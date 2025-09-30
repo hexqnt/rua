@@ -36,7 +36,7 @@ struct AreaItem {
     created_at: DateTime<Utc>,
 }
 
-// Функция для преобразования строки в f64
+/// Функция для преобразования строки в f64
 fn str_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: Deserializer<'de>,
@@ -45,7 +45,7 @@ where
     s.parse::<f64>().map_err(serde::de::Error::custom)
 }
 
-// Функция для чтения CSV в вектор структур Area
+/// Функция для чтения CSV в вектор структур Area
 fn read_csv_to_areas(file_path: &str) -> io::Result<Vec<Area>> {
     // Открываем CSV-файл
     let file = File::open(file_path)?;
@@ -78,7 +78,7 @@ fn draw() {
     }
 }
 
-// Функция для отправки запроса на URL и повторных попыток в случае ошибки
+/// Функция для отправки запроса на URL и повторных попыток в случае ошибки
 async fn fetch_url(
     client: &Client,
     timestamp: i64,
@@ -108,7 +108,7 @@ async fn fetch_url(
     Err(last_error.unwrap())
 }
 
-// Функция для получения временных меток
+/// Функция для получения временных меток
 async fn get_timestamps(client: &Client) -> Result<String, Error> {
     // let client = reqwest::blocking::Client::new();
     let time_history_url = "https://deepstatemap.live/api/history/public";
@@ -117,15 +117,13 @@ async fn get_timestamps(client: &Client) -> Result<String, Error> {
             if response.status().is_success() {
                 return response.text().await;
             }
-            return Err(response.error_for_status().unwrap_err());
+            Err(response.error_for_status().unwrap_err())
         }
-        Err(err) => {
-            panic!("Failed to fetch the URL: {}", err);
-        }
+        Err(err) => Err(err),
     }
 }
 
-// Функция для записи данных о территории в CSV
+/// Функция для записи данных о территории в CSV
 fn to_csv(areas: Vec<Area>, file_path: &Path) {
     let mut file = std::fs::File::create(file_path).unwrap();
     let head_str = "time_index,hash,area,percent,area_type\n";
@@ -161,6 +159,13 @@ async fn main() {
 
     // Загрузка временных меток
     println!("Fetching timestamps...");
+    let json_data = match get_timestamps(&client).await {
+        Ok(data) => data,
+        Err(err) => {
+            eprintln!("Failed to fetch timestamps: {err}");
+            return;
+        }
+    };
     let json_data = get_timestamps(&client).await.unwrap();
     let result: Vec<AreaItem> =
         serde_json::from_str(&json_data).expect("Failed to deserialize JSON");
