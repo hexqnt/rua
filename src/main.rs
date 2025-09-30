@@ -4,10 +4,33 @@ use serde::{Deserialize, Deserializer};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use std::{env, io};
-// use std::thread::sleep;
 use std::time::Duration;
+use std::{env, fmt, io};
 use tqdm::pbar;
+
+#[derive(Debug)]
+enum FetchError {
+    Request(reqwest::Error),
+    NoAttempts,
+}
+
+impl fmt::Display for FetchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FetchError::Request(err) => write!(f, "{err}"),
+            FetchError::NoAttempts => f.write_str("Request attempts were not performed"),
+        }
+    }
+}
+
+impl std::error::Error for FetchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            FetchError::Request(err) => Some(err),
+            FetchError::NoAttempts => None,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct Area {
@@ -36,7 +59,7 @@ struct AreaItem {
     created_at: DateTime<Utc>,
 }
 
-// Функция для преобразования строки в f64
+/// Функция для преобразования строки в f64
 fn str_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: Deserializer<'de>,
@@ -45,7 +68,7 @@ where
     s.parse::<f64>().map_err(serde::de::Error::custom)
 }
 
-// Функция для чтения CSV в вектор структур Area
+/// Функция для чтения CSV в вектор структур Area
 fn read_csv_to_areas(file_path: &str) -> io::Result<Vec<Area>> {
     // Открываем CSV-файл
     let file = File::open(file_path)?;
@@ -71,44 +94,63 @@ fn draw() {
     match read_csv_to_areas(file_path) {
         Ok(areas) => {
             for area in areas {
-                println!("{:?}", area);
+                println!("{area:?}");
             }
         }
         Err(e) => eprintln!("Ошибка при чтении CSV: {}", e),
     }
 }
 
-// Функция для отправки запроса на URL и повторных попыток в случае ошибки
+/// Функция для отправки запроса на URL и повторных попыток в случае ошибки
 async fn fetch_url(
     client: &Client,
     timestamp: i64,
     max_retries: u32,
     delay: Duration,
-) -> Result<String, Error> {
+) -> Result<String, FetchError> {
     let url = format!("https://deepstatemap.live/api/history/{timestamp}/areas");
     let mut last_error: Option<Error> = None;
     for attempt in 0..max_retries {
         match client.get(&url).send().await {
-            Ok(response) => {
-                if response.status().is_success() {
-                    return response.text().await;
-                } else {
-                    eprintln!("Attempt {} failed: HTTP {}", attempt + 1, response.status());
+            Ok(response) => match response.error_for_status() {
+                Ok(success_response) => {
+                    return success_response.text().await.map_err(FetchError::Request);
                 }
-            }
+                Err(err) => {
+                    if let Some(status) = err.status() {
+                        eprintln!("Attempt {} failed: HTTP {status} - {}", attempt + 1, err);
+                    } else {
+                        eprintln!("Attempt {} failed: {}", attempt + 1, err);
+                    }
+                    last_error = Some(err);
+                }
+            },
             Err(err) => {
-                eprintln!("Attempt {} failed: {:?}", attempt + 1, err);
+                eprintln!("Attempt {} failed: {}", attempt + 1, err);
                 last_error = Some(err);
             }
         }
-        if attempt < max_retries - 1 {
+
+        if attempt + 1 < max_retries {
+            if let Some(error) = &last_error {
+                if let Some(status) = error.status() {
+                    eprintln!("Retrying after HTTP status {status}: {error}");
+                } else {
+                    eprintln!("Retrying after error: {error}");
+                }
+            }
             tokio::time::sleep(delay).await;
         }
     }
-    Err(last_error.unwrap())
+
+    if let Some(err) = last_error {
+        Err(FetchError::Request(err))
+    } else {
+        Err(FetchError::NoAttempts)
+    }
 }
 
-// Функция для получения временных меток
+/// Функция для получения временных меток
 async fn get_timestamps(client: &Client) -> Result<String, Error> {
     // let client = reqwest::blocking::Client::new();
     let time_history_url = "https://deepstatemap.live/api/history/public";
@@ -117,15 +159,13 @@ async fn get_timestamps(client: &Client) -> Result<String, Error> {
             if response.status().is_success() {
                 return response.text().await;
             }
-            return Err(response.error_for_status().unwrap_err());
+            Err(response.error_for_status().unwrap_err())
         }
-        Err(err) => {
-            panic!("Failed to fetch the URL: {}", err);
-        }
+        Err(err) => Err(err),
     }
 }
 
-// Функция для записи данных о территории в CSV
+/// Функция для записи данных о территории в CSV
 fn to_csv(areas: Vec<Area>, file_path: &Path) {
     let mut file = std::fs::File::create(file_path).unwrap();
     let head_str = "time_index,hash,area,percent,area_type\n";
@@ -161,7 +201,13 @@ async fn main() {
 
     // Загрузка временных меток
     println!("Fetching timestamps...");
-    let json_data = get_timestamps(&client).await.unwrap();
+    let json_data = match get_timestamps(&client).await {
+        Ok(data) => data,
+        Err(err) => {
+            eprintln!("Failed to fetch timestamps: {err}");
+            return;
+        }
+    };
     let result: Vec<AreaItem> =
         serde_json::from_str(&json_data).expect("Failed to deserialize JSON");
 
