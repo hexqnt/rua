@@ -1,11 +1,12 @@
+mod plot;
+
 use chrono::{DateTime, Utc};
 use reqwest::{Client, Error};
 use serde::{Deserialize, Deserializer};
-use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
-use std::{env, fmt, io};
+use std::{env, fmt};
 use tqdm::pbar;
 
 #[derive(Debug)]
@@ -68,36 +69,13 @@ where
     s.parse::<f64>().map_err(serde::de::Error::custom)
 }
 
-/// Функция для чтения CSV в вектор структур Area
-fn read_csv_to_areas(file_path: &str) -> io::Result<Vec<Area>> {
-    // Открываем CSV-файл
-    let file = File::open(file_path)?;
-    let mut rdr = csv::Reader::from_reader(file);
-
-    // Вектор для хранения результатов
-    let mut areas = Vec::new();
-
-    // Читаем записи из CSV
-    for result in rdr.deserialize() {
-        let mut record: Area = result?;
-        // Устанавливаем time_index вручную, так как он пропускается при десериализации
-        record.time_index = Utc::now(); // Замените на нужную логику для time_index
-        areas.push(record);
-    }
-
-    Ok(areas)
-}
-
 fn draw() {
-    println!("Drawing...");
-    let file_path = "data/area_history.csv";
-    match read_csv_to_areas(file_path) {
-        Ok(areas) => {
-            for area in areas {
-                println!("{area:?}");
-            }
-        }
-        Err(e) => eprintln!("Ошибка при чтении CSV: {}", e),
+    let csv_path = Path::new("data/area_history.csv");
+    let output_path = Path::new("img/area.html");
+    if let Err(err) = plot::draw_area_chart(csv_path, output_path) {
+        eprintln!("Не удалось построить график: {err}");
+    } else {
+        println!("Сохранил интерактивный график в {}", output_path.display());
     }
 }
 
@@ -181,8 +159,8 @@ fn to_csv(areas: Vec<Area>, file_path: &Path) {
 
 #[tokio::main]
 async fn main() {
-    // draw();
-    // return;
+    draw();
+    return;
     println!("RUA - Dynamic transition of territory in the Russian-Ukrainian conflict");
     let max_retries = 10;
     let delay = Duration::from_secs(2);
@@ -231,5 +209,7 @@ async fn main() {
             Err(err) => eprintln!("Failed to fetch the URL: {:?}", err),
         }
     }
-    to_csv(areas, Path::new("data/area_history.csv"));
+    let csv_path = Path::new("data/area_history.csv");
+    to_csv(areas, csv_path);
+    draw();
 }
