@@ -1,140 +1,197 @@
 """
-Draw dynamic transition of territory in the Russian-Ukrainian conflict
+Отрисовка динамики изменения территорий в российско-украинском конфликте
 """
 
 import datetime
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.arima.model import ARIMA, ARIMAResults
 from statsmodels.tsa.tsatools import add_trend
 
 # pylint: disable=invalid-name
 
+DATA_PATH = Path("data/area_history.csv")
+IMAGE_PATH = Path("img/area.png")
+SVO_PREFIX_DATE = "2022-11-11"
 
-def append_trend(X: pd.DataFrame, date, trend_name: str) -> pd.DataFrame:
-    """Add trend to a DataFrame from a given date
+FORECAST_HORIZON_DAYS = 120
+CONFIDENCE_ALPHA = 0.01
+BOUND_FACTOR = 0.995
+MAX_PQ = 6
+MOMENTUM_YEAR_DAYS = 365
+MOMENTUM_MONTH_DAYS = 31
+ANNOTATION_SHIFT_DAYS = 19
+ROLLING_WINDOW = 5
+ROLLING_MIN_PERIODS = 3
+MAX_SEARCH_OFFSET_DAYS = 60
 
-    Args:
-        X (pd.DataFrame): DataFrame to which trend will be added
-        date (_type_): Date from which trend will be added
-        trend_name (str): Name of the trend
-
-    Raises:
-        ValueError: If date is out of range
-
-    Returns:
-        pd.DataFrame: DataFrame with added trend
-    """
-    if X.index.min() <= date <= X.index.max():
-        X[trend_name] = 0
-        X.loc[date:, trend_name] = np.arange(len(X.loc[date:, trend_name]))
-        return X
-    raise ValueError(f"Date {date} is out of range [{X.index.min()}, {X.index.max()}]")
+DTYPES = {
+    "percent": "float32",
+    "area": "float64",
+    "hash": "string",
+    "area_type": "category",
+}
 
 
-def main() -> None:
-    """Script entry point"""
+def add_segment_trend(
+    features: pd.DataFrame, start_date: pd.Timestamp, column: str
+) -> pd.DataFrame:
+    """Добавляет линейный тренд, стартующий с нуля в указанную дату."""
+    if not (features.index.min() <= start_date <= features.index.max()):
+        msg = f"Date {start_date} is out of range [{features.index.min()}, {features.index.max()}]"
+        raise ValueError(msg)
 
-    df = pd.read_csv(
-        Path("data/area_history.csv"),
+    updated = features.copy()
+    updated[column] = 0
+    updated.loc[start_date:, column] = np.arange(len(updated.loc[start_date:, column]))
+    return updated
+
+
+def load_area_history(path: Path = DATA_PATH) -> pd.DataFrame:
+    """Загружает исходный CSV с едиными правилами парсинга."""
+    return pd.read_csv(
+        path,
         index_col="time_index",
         parse_dates=True,
-        dtype={
-            "percent": "float32",
-            "area": "float64",
-            "hash": "string",
-            "area_type": "category",
-        },
+        dtype=DTYPES,
     )
 
-    area_dynamic = (
+
+def build_daily_area(df: pd.DataFrame) -> pd.DataFrame:
+    """Агрегирует данные по дням с сохранением типов территорий."""
+    return (
         df.dropna()
-        .groupby([pd.Grouper(freq="D"), "area_type"])[["area", "percent"]]
+        .groupby([pd.Grouper(freq="D"), "area_type"], observed=False)[["area", "percent"]]
         .mean()
+        .reset_index()
+        .set_index("time_index")
     )
 
-    area_dynamic.reset_index(inplace=True)
-    area_dynamic.set_index("time_index", inplace=True)
 
-    last_date = df.index.max().strftime("%Y-%m-%d %X")
-
-    occupied_by_ua = (
+def compute_occupied_by_ua(df: pd.DataFrame) -> pd.DataFrame:
+    """Среднесуточные площадь и доля, контролируемые Украиной."""
+    return (
         df[(df["area_type"] == "other_territories") & (df["hash"] == "#01579b")]
         .groupby(pd.Grouper(freq="D"))[["area", "percent"]]
         .mean()
-    )
-    occupied_by_ua.interpolate(inplace=True)
-
-    occupied_by_ru = area_dynamic[
-        area_dynamic["area_type"] == "occupied_after_24_02_2022"
-    ]["area"]  # ["percent"]
-    occupied_by_ru = pd.DataFrame(
-        index=pd.date_range(
-            start=occupied_by_ru.index.min(), end=occupied_by_ru.index.max(), freq="D"
-        )
-    ).join(occupied_by_ru)
-    occupied_by_ru.interpolate(inplace=True)
-    occupied_by_ru["prefix"] = 0
-    occupied_by_ru.loc[:"2022-11-11", "prefix"] = 1
-
-    occupied_by_ru["area"] = occupied_by_ru["area"].subtract(
-        occupied_by_ua["area"], fill_value=0
+        .interpolate()
     )
 
-    fh = 120  # int(365.25 * 5)
-    y = occupied_by_ru.loc["2022-11-12":, "area"]
-    X = pd.DataFrame(
+
+def build_occupied_by_ru(
+    area_dynamic: pd.DataFrame, occupied_by_ua: pd.DataFrame
+) -> pd.DataFrame:
+    """Ряд суточных значений площади под контролем РФ с учётом продвижения Украины."""
+    ru_area = area_dynamic[area_dynamic["area_type"] == "occupied_after_24_02_2022"][
+        "area"
+    ].copy()
+    prefix_date = pd.Timestamp(SVO_PREFIX_DATE)
+    if prefix_date.tzinfo is None and ru_area.index.tz is not None:
+        prefix_date = prefix_date.tz_localize(ru_area.index.tz)
+
+    full_range = pd.DataFrame(
         index=pd.date_range(
-            y.index.min(), y.index.max() + pd.DateOffset(days=fh), freq="D"
+            start=ru_area.index.min(), end=ru_area.index.max(), freq="D"
         )
     )
-    X = add_trend(X, "ct")
+    ru_area = full_range.join(ru_area).interpolate()
+    ru_area["prefix"] = 0
+    ru_area.loc[:prefix_date, "prefix"] = 1
+    ru_area["area"] = ru_area["area"].subtract(occupied_by_ua["area"], fill_value=0)
+    return ru_area
 
-    # Добавляем моментум
-    X = append_trend(X, y.index.max() - pd.DateOffset(days=365), "momentum_y")
-    X = append_trend(X, y.index.max() - pd.DateOffset(days=31), "momentum_m")
-    best_model = None
-    bound_factor = 0.995
-    pq = [(p, q) for p in range(6) for q in range(6)]
-    pq.sort(key=lambda x: x[0] + x[1])
+
+def build_features(y: pd.Series, horizon_days: int) -> pd.DataFrame:
+    """Формирует матрицу экзогенных признаков с трендом и моментумами."""
+    index = pd.date_range(
+        y.index.min(), y.index.max() + pd.DateOffset(days=horizon_days), freq="D"
+    )
+    features = add_trend(pd.DataFrame(index=index), "ct")
+    features = add_segment_trend(
+        features, y.index.max() - pd.DateOffset(days=MOMENTUM_YEAR_DAYS), "momentum_y"
+    )
+    features = add_segment_trend(
+        features, y.index.max() - pd.DateOffset(days=MOMENTUM_MONTH_DAYS), "momentum_m"
+    )
+    return features
+
+
+def select_arima_model(y: pd.Series, features: pd.DataFrame) -> ARIMAResults:
+    """Выбирает лучшую ARIMA(p,0,q) по AIC, отдавая приоритет простым моделям."""
+    pq = [(p, q) for p in range(MAX_PQ) for q in range(MAX_PQ)]
+    pq.sort(key=lambda pair: pair[0] + pair[1])
+
+    best_model: Optional[ARIMAResults] = None
     for p, q in pq:
-        mod = ARIMA(y, exog=X.loc[: y.index.max()], order=(p, 0, q), trend="n").fit()
-        if best_model is None or (best_model.aic * bound_factor) > mod.aic:
-            best_model = mod
+        model = ARIMA(y, exog=features.loc[: y.index.max()], order=(p, 0, q), trend="n")
+        mod_fit = model.fit()
+        if best_model is None or (best_model.aic * BOUND_FACTOR) > mod_fit.aic:
+            best_model = mod_fit
 
-    print(best_model.summary())
-    fcst = best_model.get_forecast(
-        fh, alpha=0.01, exog=X.loc[y.index.max() + pd.DateOffset(days=1) :]
+    if best_model is None:
+        raise RuntimeError("Failed to fit ARIMA model")
+    return best_model
+
+
+def forecast_area(
+    model: ARIMAResults, y: pd.Series, features: pd.DataFrame, horizon_days: int
+) -> pd.DataFrame:
+    """Строит прогноз и выравнивает полученный индекс дат."""
+    forecast = model.get_forecast(
+        horizon_days,
+        alpha=CONFIDENCE_ALPHA,
+        exog=features.loc[y.index.max() + pd.DateOffset(days=1) :],
     ).summary_frame()
-    fcst.index = pd.date_range(
+    forecast.index = pd.date_range(
         start=y.index.max() + pd.DateOffset(days=1),
-        periods=fcst.shape[0],
+        periods=forecast.shape[0],
         freq="D",
     )
+    return forecast
 
-    svo_end_alpha = 99.95
-    svo_end_km_ration = 0.01
-    hh = fcst[["mean", "mean_se"]].diff() / fcst[["mean", "mean_se"]].abs()
-    end_svo = hh[
-        (hh["mean_se"] <= 1 - svo_end_alpha / 100)
-        & (hh["mean"] <= svo_end_km_ration / 100)
+
+def trim_forecast(fcst: pd.DataFrame, alpha_threshold: float, km_ratio: float) -> pd.DataFrame:
+    """Обрезает прогноз, когда выполнены пороги доверия и темпа изменения."""
+    change_ratio = fcst[["mean", "mean_se"]].diff() / fcst[["mean", "mean_se"]].abs()
+    end_svo = change_ratio[
+        (change_ratio["mean_se"] <= 1 - alpha_threshold / 100)
+        & (change_ratio["mean"] <= km_ratio / 100)
     ].index.min()
-    fcst = fcst[:end_svo]
-    fh = 90
+    if pd.isna(end_svo):
+        return fcst
+    return fcst.loc[:end_svo]
 
-    offset = 60
-    max_idx = occupied_by_ru.iloc[-365 - offset : -offset]["area"].idxmax()
-    max_val = round(
-        occupied_by_ru.iloc[-365 - offset : -offset]["area"].max() / 1000, 1
+
+def compute_daily_change(occupied_by_ru: pd.DataFrame) -> pd.DataFrame:
+    """Сглаженные посуточные изменения контролируемой площади."""
+    return (
+        occupied_by_ru.diff().loc["2022-11-23":]
+        .rolling(ROLLING_WINDOW, center=True, min_periods=ROLLING_MIN_PERIODS)
+        .mean()
     )
 
-    fig, axs = plt.subplots(2, 1, sharex=True, figsize=(12, 6))
-    ax = axs[0]
+
+def summarize_recent_changes(day_change: pd.DataFrame) -> Tuple[float, float]:
+    """Возвращает недельный и месячный итог изменения площади."""
+    week = float(day_change["area"][-7:].sum())
+    month = float(day_change["area"][-30:].sum())
+    return week, month
+
+
+def plot_occupied_area(ax, occupied_by_ru: pd.DataFrame, fcst: pd.DataFrame) -> None:
+    """Рисует фактическую и прогнозную площадь с подписью ключевых точек."""
+    max_window = occupied_by_ru.iloc[
+        -365 - MAX_SEARCH_OFFSET_DAYS : -MAX_SEARCH_OFFSET_DAYS
+    ]["area"]
+    max_idx = max_window.idxmax()
+    max_val = round(max_window.max() / 1000, 1)
+
     sns.lineplot(occupied_by_ru["area"] / 1000, ax=ax, label="Факт")
     sns.lineplot(fcst["mean"] / 1000, ls="--", ax=ax, label="Ожидание")
     fill_95p = ax.fill_between(
@@ -155,7 +212,7 @@ def main() -> None:
     ax.text(max_idx, max_val * 1.01, f"{max_val:.1f}", ha="center", va="bottom")
 
     ax.text(
-        occupied_by_ru["area"].index.max(),
+        occupied_by_ru.index.max(),
         occupied_by_ru["area"].iloc[-1] / 1000 * 1.01,
         f"{occupied_by_ru['area'].iloc[-1] / 1000:.1f}",
         ha="center",
@@ -173,8 +230,8 @@ def main() -> None:
 
     ax.text(
         fcst.index.max(),
-        fcst["mean_ci_upper"][-1] / 1000 * 1.01,
-        f"{fcst['mean_ci_upper'][-1] / 1000:.1f}",
+        fcst["mean_ci_upper"].iloc[-1] / 1000 * 1.01,
+        f"{fcst['mean_ci_upper'].iloc[-1] / 1000:.1f}",
         ha="center",
         va="bottom",
         color="grey",
@@ -182,53 +239,52 @@ def main() -> None:
 
     ax.text(
         fcst.index.max(),
-        fcst["mean_ci_lower"][-1] / 1000 * 0.99,
-        f"{fcst['mean_ci_lower'][-1] / 1000:.1f}",
+        fcst["mean_ci_lower"].iloc[-1] / 1000 * 0.99,
+        f"{fcst['mean_ci_lower'].iloc[-1] / 1000:.1f}",
         ha="center",
         va="top",
         color="grey",
     )
 
-    ax = axs[1]
+
+def plot_daily_change(ax, day_change: pd.DataFrame) -> None:
+    """Рисует сглаженные суточные изменения с подписью на конце ряда."""
+    sns.lineplot(day_change["area"], ax=ax, legend=None)
+    ax.fill_between(
+        day_change.index,
+        0,
+        day_change["area"],
+        color="royalblue",
+        alpha=0.1,
+    )
+    bbox = {"boxstyle": "larrow", "fc": "0.8", "alpha": 0.4}
+    dy = float(day_change.iloc[-1]["area"])
+    dx = day_change.index.max()
+    ax.annotate(
+        f"{dy:.2f}",
+        (dx + datetime.timedelta(days=ANNOTATION_SHIFT_DAYS), dy),
+        bbox=bbox,
+        va="center",
+        ha="left",
+    )
     ax.set(
         xlabel=None,
         ylabel="км\u00b2/сутки",
         title="Среднесуточное изменение",
     )
-    day_din_area = (
-        occupied_by_ru.diff()["2022-11-23":]
-        .rolling(5, center=True, min_periods=3)
-        .mean()
-    )
-    area_by_last_weak = day_din_area["area"][-7:].sum()
-    area_by_last_month = day_din_area["area"][-30:].sum()
-    print(
-        f"За последнюю неделю: {area_by_last_weak:.2f}\nза последний месяц: {area_by_last_month:.2f}"
-    )
 
-    sns.lineplot(
-        day_din_area["area"],
-        ax=ax,
-        legend=None,
-    )
-    ax.fill_between(
-        day_din_area["area"].index,
-        0,
-        day_din_area["area"],
-        color="royalblue",
-        alpha=0.1,
-    )
-    bbox = {"boxstyle": "larrow", "fc": "0.8", "alpha": 0.4}
-    dy = day_din_area.iloc[-1].values[0]
-    dx = day_din_area.index.max()
-    ax.annotate(
-        f"{dy:.2f}",
-        (dx + datetime.timedelta(days=18 + int(fh / 60)), dy),
-        # xytext=(-2, 1),
-        bbox=bbox,
-        va="center",
-        ha="left",
-    )
+
+def plot_layout(
+    occupied_by_ru: pd.DataFrame,
+    fcst: pd.DataFrame,
+    last_date: str,
+    day_change: pd.DataFrame,
+) -> None:
+    """Создаёт финальный макет графиков и сохраняет изображение."""
+    fig, axs = plt.subplots(2, 1, sharex=True, figsize=(12, 6))
+
+    plot_occupied_area(axs[0], occupied_by_ru, fcst)
+    plot_daily_change(axs[1], day_change)
 
     for ax in axs:
         ax.grid(ls=":", lw=0.5)
@@ -241,8 +297,32 @@ def main() -> None:
         fontdict={"size": 8},
         alpha=0.45,
     )
-    Path("img/").mkdir(exist_ok=True)
-    fig.savefig(Path("img/area.png"), format="png", dpi=300)
+    IMAGE_PATH.parent.mkdir(exist_ok=True)
+    fig.savefig(IMAGE_PATH, format="png", dpi=300)
+
+
+def main() -> int:
+    """Точка входа скрипта."""
+    df = load_area_history()
+    last_date = df.index.max().strftime("%Y-%m-%d %X")
+    area_dynamic = build_daily_area(df)
+    occupied_by_ua = compute_occupied_by_ua(df)
+    occupied_by_ru = build_occupied_by_ru(area_dynamic, occupied_by_ua)
+
+    y = occupied_by_ru.loc["2022-11-12":, "area"]
+    features = build_features(y, FORECAST_HORIZON_DAYS)
+    model = select_arima_model(y, features)
+    print(model.summary())
+
+    fcst = forecast_area(model, y, features, FORECAST_HORIZON_DAYS)
+    fcst = trim_forecast(fcst, alpha_threshold=99.95, km_ratio=0.01)
+
+    day_change = compute_daily_change(occupied_by_ru)
+    week_change, month_change = summarize_recent_changes(day_change)
+    print(f"За последнюю неделю: {week_change:.2f}\nза последний месяц: {month_change:.2f}")
+
+    plot_layout(occupied_by_ru, fcst, last_date, day_change)
+    return 0
 
 
 if __name__ == "__main__":
