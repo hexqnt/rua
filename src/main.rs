@@ -18,8 +18,8 @@ enum FetchError {
 impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FetchError::Request(err) => write!(f, "{err}"),
-            FetchError::NoAttempts => f.write_str("Request attempts were not performed"),
+            Self::Request(err) => write!(f, "{err}"),
+            Self::NoAttempts => f.write_str("Request attempts were not performed"),
         }
     }
 }
@@ -27,8 +27,8 @@ impl fmt::Display for FetchError {
 impl std::error::Error for FetchError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            FetchError::Request(err) => Some(err),
-            FetchError::NoAttempts => None,
+            Self::Request(err) => Some(err),
+            Self::NoAttempts => None,
         }
     }
 }
@@ -121,11 +121,10 @@ async fn fetch_url(
         }
     }
 
-    if let Some(err) = last_error {
-        Err(FetchError::Request(err))
-    } else {
-        Err(FetchError::NoAttempts)
-    }
+    last_error.map_or_else(
+        || Err(FetchError::NoAttempts),
+        |err| Err(FetchError::Request(err)),
+    )
 }
 
 /// Функция для получения временных меток
@@ -159,8 +158,8 @@ fn to_csv(areas: Vec<Area>, file_path: &Path) {
 
 #[tokio::main]
 async fn main() {
-    draw();
-    return;
+    // draw();
+    // return;
     println!("RUA - Dynamic transition of territory in the Russian-Ukrainian conflict");
     let max_retries = 10;
     let delay = Duration::from_secs(2);
@@ -200,13 +199,13 @@ async fn main() {
             Ok(content) => {
                 let mut area: Vec<Area> =
                     serde_json::from_str(&content).expect("Failed to deserialize JSON");
-                for a in area.iter_mut() {
+                for a in &mut area {
                     a.time_index = DateTime::<Utc>::from_timestamp(timestamp, 0).unwrap();
                 }
                 areas.extend(area);
                 pbar.update(1).unwrap();
             }
-            Err(err) => eprintln!("Failed to fetch the URL: {:?}", err),
+            Err(err) => eprintln!("Failed to fetch the URL: {err:?}"),
         }
     }
     let csv_path = Path::new("data/area_history.csv");
