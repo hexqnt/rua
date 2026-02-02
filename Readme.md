@@ -1,6 +1,8 @@
-# rua
+# RUA
 
 Динамика перехода территории в Российско-Украинском конфликте
+
+[![CI](https://github.com/hexqnt/rua/actions/workflows/ci.yml/badge.svg)](https://github.com/hexqnt/rua/actions/workflows/ci.yml)
 
 ## Запуск
 
