@@ -87,7 +87,7 @@ impl DailyAccumulator {
 
 /// Дневные бакеты, сгруппированные по категориям площадей.
 #[derive(Default)]
-pub(crate) struct AreaBuckets {
+pub struct AreaBuckets {
     ru: DailyBuckets,
     ua: DailyBuckets,
 }
@@ -110,7 +110,7 @@ impl AreaBuckets {
 }
 
 /// Читает CSV и раскладывает значения по дневным бакетам.
-pub(crate) fn load_area_buckets(csv_path: &Path) -> Result<AreaBuckets, Box<dyn Error>> {
+pub fn load_area_buckets(csv_path: &Path) -> Result<AreaBuckets, Box<dyn Error>> {
     let mut reader = csv::Reader::from_path(csv_path)?;
     let mut hint = None;
     reader
@@ -125,7 +125,7 @@ pub(crate) fn load_area_buckets(csv_path: &Path) -> Result<AreaBuckets, Box<dyn 
 }
 
 /// Строит непрерывный ряд занятых территорий, вычитая и интерполируя RU/UA.
-pub(crate) fn build_occupied_series(
+pub fn build_occupied_series(
     buckets: &AreaBuckets,
 ) -> Result<(Vec<NaiveDate>, Vec<f64>), Box<dyn Error>> {
     let first_date = buckets
@@ -170,10 +170,10 @@ fn parse_time_index_with_hint(
         return Err(ERROR_EMPTY_TIME_INDEX.into());
     }
 
-    if let Some(hint) = *hint {
-        if let Some(parsed) = hint.parse(trimmed) {
-            return Ok(parsed);
-        }
+    if let Some(hint) = *hint
+        && let Some(parsed) = hint.parse(trimmed)
+    {
+        return Ok(parsed);
     }
 
     if let Ok(dt) = DateTime::parse_from_str(trimmed, TIME_FORMAT_TZ) {

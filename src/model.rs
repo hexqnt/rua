@@ -719,20 +719,17 @@ fn volatility_weights(series: &[f64]) -> Vec<f64> {
 
     let mut diffs = Vec::with_capacity(n);
     diffs.push(0.0);
-    for idx in 1..n {
-        diffs.push((series[idx] - series[idx - 1]).abs());
+    for pair in series.windows(2) {
+        diffs.push((pair[1] - pair[0]).abs());
     }
 
     let mut vol = vec![0.0; n];
-    for idx in 1..n {
+    for (idx, slot) in vol.iter_mut().enumerate().skip(1) {
         let start = idx.saturating_sub(HETERO_WINDOW - 1).max(1);
-        let mut sum = 0.0;
-        let mut count = 0;
-        for j in start..=idx {
-            sum += diffs[j];
-            count += 1;
-        }
-        vol[idx] = if count > 0 { sum / count as f64 } else { 0.0 };
+        let window = &diffs[start..=idx];
+        let sum: f64 = window.iter().sum();
+        let count = window.len();
+        *slot = if count > 0 { sum / count as f64 } else { 0.0 };
     }
     vol[0] = vol[1];
 

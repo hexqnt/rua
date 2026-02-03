@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use maud::{DOCTYPE, PreEscaped, html};
 use plotly::Plot;
 
+use super::DownloadLinks;
 use super::chart::ChartSummary;
 use super::data::{UNFRIENDLY_COUNTRIES, US_STATES};
 
@@ -21,8 +22,6 @@ const PLOTLY_CDN: &str = "https://cdn.plot.ly/plotly-2.35.2.min.js";
 const GITHUB_REPO_URL: &str = "https://github.com/hexqnt/rua";
 const GITHUB_REPO_TEXT: &str = "github.com/hexqnt/rua";
 const FLAG_CDN_BASE: &str = "https://flagcdn.com/24x18/";
-const FORECAST_CSV_PATH: &str = "forecast.csv";
-const HISTORY_CSV_PATH: &str = "history.csv";
 const UNIT_THOUSAND_KM2: &str = "тыс. км²";
 const UNIT_KM2: &str = "км²";
 
@@ -30,6 +29,7 @@ pub(super) fn render_plot_page(
     plot: &Plot,
     summary: &ChartSummary,
     generated_at: DateTime<Utc>,
+    download_links: &DownloadLinks,
 ) -> String {
     let plot_html = plot.to_inline_html(Some("area-plot"));
     let latest_area_sq_km = summary.latest_area_km2 * 1000.0;
@@ -39,6 +39,8 @@ pub(super) fn render_plot_page(
     let ukraine_percent_label = format!("{:.2}%", summary.ukraine_percent);
     let daily_change_label = format_change(summary.daily_change_km2, UNIT_KM2);
     let weekly_change_label = format_change(summary.weekly_change_km2, UNIT_KM2);
+    let history_download_label = format!("Скачать {}", download_links.history);
+    let forecast_download_label = format!("Скачать {}", download_links.forecast);
     let forecast_card = summary.forecast.as_ref().map(|forecast| {
         (
             format!("Через {} дн.", forecast.horizon_days),
@@ -363,10 +365,10 @@ pub(super) fn render_plot_page(
                                 div class="summary-label" {
                                     "Последний срез"
                                     a class="summary-label-icon"
-                                        href=(HISTORY_CSV_PATH)
+                                        href=(&download_links.history)
                                         download
-                                        aria-label="Скачать history.csv"
-                                        title="Скачать history.csv" {
+                                        aria-label=(&history_download_label)
+                                        title=(&history_download_label) {
                                         svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {
                                             path
                                                 fill="currentColor"
@@ -382,10 +384,10 @@ pub(super) fn render_plot_page(
                                     div class="summary-label" {
                                         "Прогноз"
                                         a class="summary-label-icon"
-                                            href=(FORECAST_CSV_PATH)
+                                            href=(&download_links.forecast)
                                             download
-                                            aria-label="Скачать forecast.csv"
-                                            title="Скачать forecast.csv" {
+                                            aria-label=(&forecast_download_label)
+                                            title=(&forecast_download_label) {
                                             svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {
                                                 path
                                                     fill="currentColor"

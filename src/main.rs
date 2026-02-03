@@ -6,6 +6,8 @@ mod report;
 mod series;
 
 use clap::{CommandFactory, Parser, Subcommand};
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use serde::Deserialize;
 use std::fs::{self, File};
 use std::io::IsTerminal;
@@ -22,6 +24,7 @@ const APP_ABOUT: &str = "RUA - Dynamic transition of territory in the Russian-Uk
 const DEFAULT_OUTPUT_HTML: &str = "dist/index.html";
 const DEFAULT_HISTORY_CSV: &str = "dist/history.csv";
 const DEFAULT_FORECAST_CSV: &str = "dist/forecast.csv";
+const CSV_ARCHIVE_EXTENSION: &str = "gz";
 const DEFAULT_FORECAST_HORIZON_DAYS: usize = 365;
 const DEFAULT_MODEL_CONFIG: &str = "config/model.toml";
 const DEFAULT_MODEL_NAME: &str = "trend-filter";
@@ -32,6 +35,9 @@ const FETCH_DELAY_SECS: u64 = 2;
 #[derive(Parser, Debug)]
 #[command(name = "rua", about = APP_ABOUT)]
 struct Args {
+    /// Архивировать CSV в .csv.gz и использовать архивы в HTML.
+    #[arg(long = "archive-csv", global = true)]
+    archive_csv: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -292,22 +298,19 @@ fn load_model_config(path: &Path) -> Result<ResolvedModelConfig, String> {
 fn generate_completions(shell: Shell, output: Option<PathBuf>) -> Result<(), String> {
     let mut cmd = Args::command();
     let bin_name = cmd.get_name().to_string();
-    match output {
-        Some(path) => {
-            if let Some(parent) = path.parent()
-                && !parent.as_os_str().is_empty()
-            {
-                fs::create_dir_all(parent)
-                    .map_err(|err| format!("Failed to create {}: {err}", parent.display()))?;
-            }
-            let mut file = File::create(&path)
-                .map_err(|err| format!("Failed to create {}: {err}", path.display()))?;
-            generate(shell, &mut cmd, bin_name, &mut file);
+    if let Some(path) = output {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("Failed to create {}: {err}", parent.display()))?;
         }
-        None => {
-            let mut stdout = std::io::stdout();
-            generate(shell, &mut cmd, bin_name, &mut stdout);
-        }
+        let mut file = File::create(&path)
+            .map_err(|err| format!("Failed to create {}: {err}", path.display()))?;
+        generate(shell, &mut cmd, bin_name, &mut file);
+    } else {
+        let mut stdout = std::io::stdout();
+        generate(shell, &mut cmd, bin_name, &mut stdout);
     }
     Ok(())
 }
@@ -387,9 +390,68 @@ async fn download_to_csv(output_csv: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn file_name_for(path: &Path) -> Result<String, String> {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| format!("Path {} has no file name", path.display()))
+}
+
+fn archive_path_for(csv_path: &Path) -> Result<PathBuf, String> {
+    let file_name = file_name_for(csv_path)?;
+    let archive_name = format!("{file_name}.{CSV_ARCHIVE_EXTENSION}");
+    let mut archive_path = csv_path.to_path_buf();
+    archive_path.set_file_name(archive_name);
+    Ok(archive_path)
+}
+
+fn archive_csv_file(csv_path: &Path) -> Result<PathBuf, String> {
+    let archive_path = archive_path_for(csv_path)?;
+    if let Some(parent) = archive_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Failed to create {}: {err}", parent.display()))?;
+    }
+    let mut input = File::open(csv_path)
+        .map_err(|err| format!("Failed to open CSV {}: {err}", csv_path.display()))?;
+    let output = File::create(&archive_path)
+        .map_err(|err| format!("Failed to create archive {}: {err}", archive_path.display()))?;
+    let mut encoder = GzEncoder::new(output, Compression::default());
+    std::io::copy(&mut input, &mut encoder)
+        .map_err(|err| format!("Failed to write archive {}: {err}", archive_path.display()))?;
+    encoder.finish().map_err(|err| {
+        format!(
+            "Failed to finalize archive {}: {err}",
+            archive_path.display()
+        )
+    })?;
+    Ok(archive_path)
+}
+
+fn download_name(csv_path: &Path, archive: bool) -> Result<String, String> {
+    if archive {
+        let archive_path = archive_path_for(csv_path)?;
+        file_name_for(&archive_path)
+    } else {
+        file_name_for(csv_path)
+    }
+}
+
+fn build_download_links(
+    history_csv: &Path,
+    forecast_csv: &Path,
+    archive: bool,
+) -> Result<report::DownloadLinks, String> {
+    Ok(report::DownloadLinks {
+        history: download_name(history_csv, archive)?,
+        forecast: download_name(forecast_csv, archive)?,
+    })
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+    let archive_csv = args.archive_csv;
     match args.command {
         Command::Completions { shell, output } => {
             if let Err(err) = generate_completions(shell, output) {
@@ -416,6 +478,7 @@ async fn main() {
             tracing::info!(
                 mode = "run",
                 model = %model_config.name,
+                archive_csv,
                 horizon_days,
                 model_config_path = %model_config_path.display(),
                 output_history_csv = %output_history_csv.display(),
@@ -423,6 +486,17 @@ async fn main() {
                 output_html = %output_html.display(),
                 "Starting full pipeline"
             );
+            let download_links = match build_download_links(
+                &output_history_csv,
+                &output_forecast_csv,
+                archive_csv,
+            ) {
+                Ok(links) => links,
+                Err(err) => {
+                    error(&err);
+                    return;
+                }
+            };
             info(&format!(
                 "Saving history CSV to {}",
                 output_history_csv.display()
@@ -430,6 +504,15 @@ async fn main() {
             if let Err(err) = download_to_csv(&output_history_csv).await {
                 error(&err);
                 return;
+            }
+            if archive_csv {
+                match archive_csv_file(&output_history_csv) {
+                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                }
             }
 
             let buckets = match series::load_area_buckets(&output_history_csv) {
@@ -453,12 +536,22 @@ async fn main() {
                 error(&format!("Failed to write forecast CSV: {err}"));
                 return;
             }
+            if archive_csv {
+                match archive_csv_file(&output_forecast_csv) {
+                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                }
+            }
 
             let overlay = build_forecast_overlay(&forecast);
             if let Err(err) = report::draw_area_chart_with_forecast_from_buckets(
                 &buckets,
                 &output_html,
                 Some(overlay),
+                Some(download_links),
             ) {
                 error(&format!("Failed to render forecast chart: {err}"));
                 return;
@@ -475,6 +568,7 @@ async fn main() {
             headline(APP_ABOUT);
             tracing::info!(
                 mode = "download",
+                archive_csv,
                 output_csv = %output_csv.display(),
                 "Downloading history data"
             );
@@ -482,6 +576,15 @@ async fn main() {
             if let Err(err) = download_to_csv(&output_csv).await {
                 error(&err);
                 return;
+            }
+            if archive_csv {
+                match archive_csv_file(&output_csv) {
+                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                }
             }
             success(&format!("Saved CSV to {}", output_csv.display()));
         }
@@ -503,6 +606,7 @@ async fn main() {
             tracing::info!(
                 mode = "forecast",
                 model = %model_config.name,
+                archive_csv,
                 horizon_days,
                 model_config_path = %model_config_path.display(),
                 input_csv = %csv.display(),
@@ -521,6 +625,15 @@ async fn main() {
                 error(&format!("Failed to write forecast CSV: {err}"));
                 return;
             }
+            if archive_csv {
+                match archive_csv_file(&output_csv) {
+                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                }
+            }
             success(&format!("Saved forecast to {}", output_csv.display()));
         }
         Command::Render {
@@ -532,11 +645,35 @@ async fn main() {
             headline(APP_ABOUT);
             tracing::info!(
                 mode = "render",
+                archive_csv,
                 input_csv = %csv.display(),
                 forecast_csv = %forecast_csv.display(),
                 output_html = %output_html.display(),
                 "Rendering HTML report"
             );
+            let download_links = match build_download_links(&csv, &forecast_csv, archive_csv) {
+                Ok(links) => links,
+                Err(err) => {
+                    error(&err);
+                    return;
+                }
+            };
+            if archive_csv {
+                match archive_csv_file(&csv) {
+                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                }
+                match archive_csv_file(&forecast_csv) {
+                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                }
+            }
             let overlay = match load_forecast_overlay(&forecast_csv) {
                 Ok(overlay) => overlay,
                 Err(err) => {
@@ -545,9 +682,12 @@ async fn main() {
                 }
             };
 
-            if let Err(err) =
-                report::draw_area_chart_with_forecast(&csv, &output_html, Some(overlay))
-            {
+            if let Err(err) = report::draw_area_chart_with_forecast(
+                &csv,
+                &output_html,
+                Some(overlay),
+                Some(download_links),
+            ) {
                 error(&format!("Failed to render forecast chart: {err}"));
                 return;
             }

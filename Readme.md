@@ -27,6 +27,11 @@ cargo run -- run
 - `render`: строит HTML по историческому CSV и CSV с прогнозом (прогноз обязателен).
 - `completions`: генерирует автодополнения для shell.
 
+### Архивация CSV
+
+Флаг `--archive-csv` сохраняет архивированные копии CSV (`.csv.gz`) и подставляет ссылки на них
+в HTML-странице.
+
 Примеры:
 
 ```sh
@@ -41,6 +46,9 @@ cargo run -- forecast --csv dist/history.csv --output-csv dist/forecast.csv
 
 # HTML из CSV и прогноза
 cargo run -- render --csv dist/history.csv --forecast-csv dist/forecast.csv --output-html dist/custom.html
+
+# Полный режим с архивированием CSV
+cargo run -- run --archive-csv
 
 # Автодополнения (stdout)
 cargo run -- completions bash > /tmp/rua.bash
