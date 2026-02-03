@@ -36,6 +36,7 @@ const FETCH_DELAY_SECS: u64 = 2;
 #[command(name = "rua", about = APP_ABOUT)]
 struct Args {
     /// Архивировать CSV в .csv.gz и использовать архивы в HTML.
+    /// Исходные CSV удаляются после успешной архивации.
     #[arg(long = "archive-csv", global = true)]
     archive_csv: bool,
     #[command(subcommand)]
@@ -54,6 +55,9 @@ enum Command {
             default_value = DEFAULT_OUTPUT_HTML
         )]
         output_html: PathBuf,
+        /// Минифицировать HTML (консервативные настройки minify-html).
+        #[arg(long = "minify-html")]
+        minify_html: bool,
         /// Куда сохранить CSV с историческими данными.
         #[arg(
             long = "output-history-csv",
@@ -147,6 +151,9 @@ enum Command {
             default_value = DEFAULT_OUTPUT_HTML
         )]
         output_html: PathBuf,
+        /// Минифицировать HTML (консервативные настройки minify-html).
+        #[arg(long = "minify-html")]
+        minify_html: bool,
     },
     /// Сгенерировать файлы автодополнения для shell.
     Completions {
@@ -428,6 +435,11 @@ fn archive_csv_file(csv_path: &Path) -> Result<PathBuf, String> {
     Ok(archive_path)
 }
 
+fn remove_csv_file(csv_path: &Path) -> Result<(), String> {
+    fs::remove_file(csv_path)
+        .map_err(|err| format!("Failed to remove CSV {}: {err}", csv_path.display()))
+}
+
 fn download_name(csv_path: &Path, archive: bool) -> Result<String, String> {
     if archive {
         let archive_path = archive_path_for(csv_path)?;
@@ -461,6 +473,7 @@ async fn main() {
         }
         Command::Run {
             output_html,
+            minify_html,
             output_history_csv,
             output_forecast_csv,
             horizon_days,
@@ -484,6 +497,7 @@ async fn main() {
                 output_history_csv = %output_history_csv.display(),
                 output_forecast_csv = %output_forecast_csv.display(),
                 output_html = %output_html.display(),
+                minify_html,
                 "Starting full pipeline"
             );
             let download_links = match build_download_links(
@@ -522,6 +536,12 @@ async fn main() {
                     return;
                 }
             };
+            if archive_csv {
+                if let Err(err) = remove_csv_file(&output_history_csv) {
+                    error(&err);
+                    return;
+                }
+            }
 
             let forecast = match train_forecast_from_buckets(&buckets, horizon_days, &model_config)
             {
@@ -544,6 +564,10 @@ async fn main() {
                         return;
                     }
                 }
+                if let Err(err) = remove_csv_file(&output_forecast_csv) {
+                    error(&err);
+                    return;
+                }
             }
 
             let overlay = build_forecast_overlay(&forecast);
@@ -552,6 +576,7 @@ async fn main() {
                 &output_html,
                 Some(overlay),
                 Some(download_links),
+                minify_html,
             ) {
                 error(&format!("Failed to render forecast chart: {err}"));
                 return;
@@ -559,7 +584,13 @@ async fn main() {
 
             success(&format!(
                 "Saved forecast to {} and {}",
-                output_forecast_csv.display(),
+                if archive_csv {
+                    archive_path_for(&output_forecast_csv)
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|_| output_forecast_csv.display().to_string())
+                } else {
+                    output_forecast_csv.display().to_string()
+                },
                 output_html.display()
             ));
         }
@@ -579,14 +610,22 @@ async fn main() {
             }
             if archive_csv {
                 match archive_csv_file(&output_csv) {
-                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Ok(path) => {
+                        success(&format!("Saved archive to {}", path.display()));
+                        if let Err(err) = remove_csv_file(&output_csv) {
+                            error(&err);
+                            return;
+                        }
+                    }
                     Err(err) => {
                         error(&err);
                         return;
                     }
                 }
             }
-            success(&format!("Saved CSV to {}", output_csv.display()));
+            if !archive_csv {
+                success(&format!("Saved CSV to {}", output_csv.display()));
+            }
         }
         Command::Forecast {
             csv,
@@ -627,19 +666,35 @@ async fn main() {
             }
             if archive_csv {
                 match archive_csv_file(&output_csv) {
-                    Ok(path) => success(&format!("Saved archive to {}", path.display())),
+                    Ok(path) => {
+                        success(&format!("Saved archive to {}", path.display()));
+                        if let Err(err) = remove_csv_file(&output_csv) {
+                            error(&err);
+                            return;
+                        }
+                    }
                     Err(err) => {
                         error(&err);
                         return;
                     }
                 }
             }
-            success(&format!("Saved forecast to {}", output_csv.display()));
+            success(&format!(
+                "Saved forecast to {}",
+                if archive_csv {
+                    archive_path_for(&output_csv)
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|_| output_csv.display().to_string())
+                } else {
+                    output_csv.display().to_string()
+                }
+            ));
         }
         Command::Render {
             csv,
             forecast_csv,
             output_html,
+            minify_html,
         } => {
             init_logging();
             headline(APP_ABOUT);
@@ -649,6 +704,7 @@ async fn main() {
                 input_csv = %csv.display(),
                 forecast_csv = %forecast_csv.display(),
                 output_html = %output_html.display(),
+                minify_html,
                 "Rendering HTML report"
             );
             let download_links = match build_download_links(&csv, &forecast_csv, archive_csv) {
@@ -687,9 +743,20 @@ async fn main() {
                 &output_html,
                 Some(overlay),
                 Some(download_links),
+                minify_html,
             ) {
                 error(&format!("Failed to render forecast chart: {err}"));
                 return;
+            }
+            if archive_csv {
+                if let Err(err) = remove_csv_file(&csv) {
+                    error(&err);
+                    return;
+                }
+                if let Err(err) = remove_csv_file(&forecast_csv) {
+                    error(&err);
+                    return;
+                }
             }
             success(&format!("Saved HTML to {}", output_html.display()));
         }

@@ -16,6 +16,7 @@ cargo run -- run
 
 График сохраняется в `dist/index.html` как полноценная страница, собранная через `maud`.
 Путь можно переопределить флагом `--output-html`.
+Флаг `--minify-html` включает минификацию HTML с консервативными настройками `minify-html`.
 Для отображения Plotly и флагов стран используется CDN (нужен интернет при открытии HTML).
 
 ### Режимы запуска
@@ -29,8 +30,8 @@ cargo run -- run
 
 ### Архивация CSV
 
-Флаг `--archive-csv` сохраняет архивированные копии CSV (`.csv.gz`) и подставляет ссылки на них
-в HTML-странице.
+Флаг `--archive-csv` сохраняет данные только в виде архивов CSV (`.csv.gz`), удаляя исходные
+`.csv` после архивации, и подставляет ссылки на архивы в HTML-странице.
 
 Примеры:
 
@@ -46,6 +47,9 @@ cargo run -- forecast --csv dist/history.csv --output-csv dist/forecast.csv
 
 # HTML из CSV и прогноза
 cargo run -- render --csv dist/history.csv --forecast-csv dist/forecast.csv --output-html dist/custom.html
+
+# HTML с минификацией
+cargo run -- render --csv dist/history.csv --forecast-csv dist/forecast.csv --minify-html
 
 # Полный режим с архивированием CSV
 cargo run -- run --archive-csv

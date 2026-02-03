@@ -33,7 +33,7 @@ impl Default for DownloadLinks {
 
 /// Собирает и сохраняет Plotly-график без прогноза (как в прежней Python-версии).
 pub fn draw_area_chart(csv_path: &Path, output_html: &Path) -> Result<(), Box<dyn Error>> {
-    draw_area_chart_with_forecast(csv_path, output_html, None, None)
+    draw_area_chart_with_forecast(csv_path, output_html, None, None, false)
 }
 
 pub fn draw_area_chart_with_forecast(
@@ -41,9 +41,10 @@ pub fn draw_area_chart_with_forecast(
     output_html: &Path,
     forecast: Option<ForecastOverlay>,
     download_links: Option<DownloadLinks>,
+    minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
     let chart::ChartOutput { plot, summary } = chart::build_area_chart(csv_path, forecast)?;
-    render_plot(plot, summary, output_html, download_links)
+    render_plot(plot, summary, output_html, download_links, minify_html)
 }
 
 pub fn draw_area_chart_with_forecast_from_buckets(
@@ -51,10 +52,11 @@ pub fn draw_area_chart_with_forecast_from_buckets(
     output_html: &Path,
     forecast: Option<ForecastOverlay>,
     download_links: Option<DownloadLinks>,
+    minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
     let chart::ChartOutput { plot, summary } =
         chart::build_area_chart_from_buckets(buckets, forecast)?;
-    render_plot(plot, summary, output_html, download_links)
+    render_plot(plot, summary, output_html, download_links, minify_html)
 }
 
 fn render_plot(
@@ -62,6 +64,7 @@ fn render_plot(
     summary: chart::ChartSummary,
     output_html: &Path,
     download_links: Option<DownloadLinks>,
+    minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Создаём директорию для HTML, если её ещё нет.
     if let Some(parent) = output_html.parent()
@@ -73,6 +76,12 @@ fn render_plot(
     let generated_at = Utc::now();
     let links = download_links.unwrap_or_default();
     let page = page::render_plot_page(&plot, &summary, generated_at, &links);
-    fs::write(output_html, page)?;
+    if minify_html {
+        let cfg = minify_html::Cfg::new();
+        let minified = minify_html::minify(page.as_bytes(), &cfg);
+        fs::write(output_html, minified)?;
+    } else {
+        fs::write(output_html, page)?;
+    }
     Ok(())
 }
