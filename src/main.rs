@@ -5,7 +5,7 @@ mod model;
 mod report;
 mod series;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use serde::Deserialize;
@@ -55,8 +55,12 @@ enum Command {
             default_value = DEFAULT_OUTPUT_HTML
         )]
         output_html: PathBuf,
-        /// Минифицировать HTML (консервативные настройки minify-html).
-        #[arg(long = "minify-html")]
+        /// Не минифицировать HTML (по умолчанию минифицируется).
+        #[arg(
+            long = "no-minify-html",
+            default_value_t = true,
+            action = ArgAction::SetFalse
+        )]
         minify_html: bool,
         /// Куда сохранить CSV с историческими данными.
         #[arg(
@@ -151,8 +155,12 @@ enum Command {
             default_value = DEFAULT_OUTPUT_HTML
         )]
         output_html: PathBuf,
-        /// Минифицировать HTML (консервативные настройки minify-html).
-        #[arg(long = "minify-html")]
+        /// Не минифицировать HTML (по умолчанию минифицируется).
+        #[arg(
+            long = "no-minify-html",
+            default_value_t = true,
+            action = ArgAction::SetFalse
+        )]
         minify_html: bool,
     },
     /// Сгенерировать файлы автодополнения для shell.
