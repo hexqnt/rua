@@ -33,7 +33,11 @@ pub(super) fn render_plot_page(
 ) -> String {
     let plot_html = plot.to_inline_html(Some("area-plot"));
     let latest_area_sq_km = summary.latest_area_km2 * 1000.0;
-    let country_rows = build_country_rows(latest_area_sq_km);
+    let forecast_area_sq_km = summary
+        .forecast
+        .as_ref()
+        .map(|forecast| forecast.mean_km2 * 1000.0);
+    let country_rows = build_country_rows(latest_area_sq_km, forecast_area_sq_km);
     let generated_label = generated_at.format(GENERATED_AT_FORMAT).to_string();
     let latest_area_label = format!("{:.1} {UNIT_THOUSAND_KM2}", summary.latest_area_km2);
     let ukraine_percent_label = format!("{:.2}%", summary.ukraine_percent);
@@ -300,6 +304,9 @@ pub(super) fn render_plot_page(
                     .ratio-table tbody tr:nth-child(even) {
                         background: rgba(31, 36, 48, 0.02);
                     }
+                    .ratio-table td.ratio-forecast {
+                        color: var(--muted);
+                    }
                     .ratio-note {
                         margin-top: 10px;
                         font-size: 11px;
@@ -433,6 +440,7 @@ pub(super) fn render_plot_page(
                                         tr {
                                             th { "Страна" }
                                             th { "Соотношение" }
+                                            th { "Прогноз" }
                                         }
                                     }
                                     tbody {
@@ -447,6 +455,7 @@ pub(super) fn render_plot_page(
                                                     (row.name)
                                                 }
                                                 td { (&row.ratio) }
+                                                td class="ratio-forecast" { (&row.forecast_ratio) }
                                             }
                                         }
                                     }
@@ -459,6 +468,7 @@ pub(super) fn render_plot_page(
                                         tr {
                                             th { "Штат" }
                                             th { "Соотношение" }
+                                            th { "Прогноз" }
                                         }
                                     }
                                     tbody {
@@ -473,6 +483,7 @@ pub(super) fn render_plot_page(
                                                     (row.name)
                                                 }
                                                 td { (&row.ratio) }
+                                                td class="ratio-forecast" { (&row.forecast_ratio) }
                                             }
                                         }
                                     }
@@ -480,7 +491,8 @@ pub(super) fn render_plot_page(
                             }
                         }
                         p class="ratio-note" {
-                            "Соотношение рассчитано по последнему значению графика."
+                            "Соотношение рассчитано по последнему значению графика. "
+                            "Прогноз — по среднему значению на конец горизонта."
                         }
                         script {
                             (PreEscaped(r#"
@@ -524,6 +536,7 @@ struct CountryRow {
     flag: &'static str,
     ratio: String,
     ratio_value: f64,
+    forecast_ratio: String,
 }
 
 struct TableRows {
@@ -531,16 +544,21 @@ struct TableRows {
     states: Vec<CountryRow>,
 }
 
-fn build_country_rows(latest_area_sq_km: f64) -> TableRows {
+fn build_country_rows(latest_area_sq_km: f64, forecast_area_sq_km: Option<f64>) -> TableRows {
     let countries = UNFRIENDLY_COUNTRIES
         .iter()
         .map(|(name, area, flag)| {
             let ratio_value = latest_area_sq_km / *area;
+            let forecast_ratio = forecast_area_sq_km
+                .map(|forecast_area| forecast_area / *area)
+                .map(|value| format!("{value:.2}x"))
+                .unwrap_or_else(|| "—".to_string());
             CountryRow {
                 name,
                 flag,
                 ratio: format!("{ratio_value:.2}x"),
                 ratio_value,
+                forecast_ratio,
             }
         })
         .collect::<Vec<_>>();
@@ -549,11 +567,16 @@ fn build_country_rows(latest_area_sq_km: f64) -> TableRows {
         .iter()
         .map(|(name, area, flag)| {
             let ratio_value = latest_area_sq_km / *area;
+            let forecast_ratio = forecast_area_sq_km
+                .map(|forecast_area| forecast_area / *area)
+                .map(|value| format!("{value:.2}x"))
+                .unwrap_or_else(|| "—".to_string());
             CountryRow {
                 name,
                 flag,
                 ratio: format!("{ratio_value:.2}x"),
                 ratio_value,
+                forecast_ratio,
             }
         })
         .collect::<Vec<_>>();
