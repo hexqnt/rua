@@ -49,8 +49,19 @@ pub fn build_client() -> Client {
     match env::var(HTTPS_PROXY_ENV) {
         Ok(val) => {
             info!(proxy = %val, "Using HTTPS proxy");
-            let proxy = reqwest::Proxy::https(val).unwrap();
-            Client::builder().proxy(proxy).build().unwrap()
+            match reqwest::Proxy::https(&val) {
+                Ok(proxy) => match Client::builder().proxy(proxy).build() {
+                    Ok(client) => client,
+                    Err(err) => {
+                        warn!(error = %err, "Failed to build client with proxy, falling back to direct client");
+                        Client::new()
+                    }
+                },
+                Err(err) => {
+                    warn!(error = %err, "Invalid HTTPS_PROXY, falling back to direct client");
+                    Client::new()
+                }
+            }
         }
         Err(e) => {
             warn!(error = %e, "Couldn't interpret HTTPS_PROXY");

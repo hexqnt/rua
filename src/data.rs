@@ -38,17 +38,19 @@ where
 }
 
 /// Записывает точки площадей в CSV, создавая директорию при необходимости.
-pub fn to_csv(areas: Vec<Area>, file_path: &Path) {
+pub fn to_csv(areas: Vec<Area>, file_path: &Path) -> Result<(), String> {
     if let Some(parent) = file_path.parent()
         && !parent.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(parent).unwrap();
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("Failed to create {}: {err}", parent.display()))?;
     }
-    let file = std::fs::File::create(file_path).unwrap();
+    let file = std::fs::File::create(file_path)
+        .map_err(|err| format!("Failed to create CSV {}: {err}", file_path.display()))?;
     let mut writer = csv::Writer::from_writer(BufWriter::new(file));
     writer
         .write_record(CSV_HEADER.trim_end().split(','))
-        .unwrap();
+        .map_err(|err| format!("Failed to write CSV header to {}: {err}", file_path.display()))?;
     for area in areas {
         writer
             .write_record([
@@ -58,9 +60,12 @@ pub fn to_csv(areas: Vec<Area>, file_path: &Path) {
                 area.percent.to_string(),
                 area.area_type,
             ])
-            .unwrap();
+            .map_err(|err| format!("Failed to write CSV row to {}: {err}", file_path.display()))?;
     }
-    writer.flush().unwrap();
+    writer
+        .flush()
+        .map_err(|err| format!("Failed to flush CSV {}: {err}", file_path.display()))?;
+    Ok(())
 }
 
 /// Загружает все доступные срезы и проставляет `time_index` из timestamp.
@@ -102,7 +107,9 @@ pub async fn fetch_areas(
             }
             Err(err) => warn!(error = %err, "Failed to fetch the URL"),
         }
-        pbar.update(1).unwrap();
+        if let Err(err) = pbar.update(1) {
+            warn!(error = %err, "Failed to update progress bar");
+        }
     }
 
     Ok(areas)

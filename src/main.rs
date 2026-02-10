@@ -401,7 +401,7 @@ async fn download_to_csv(output_csv: &Path) -> Result<(), String> {
     let delay = Duration::from_secs(FETCH_DELAY_SECS);
     let client = fetch::build_client();
     let areas = fetch_areas(&client, FETCH_MAX_RETRIES, delay).await?;
-    to_csv(areas, output_csv);
+    to_csv(areas, output_csv)?;
     Ok(())
 }
 

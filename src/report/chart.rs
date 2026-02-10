@@ -1,6 +1,7 @@
 //! Подготовка данных и генерация Plotly-графика.
 
 use std::error::Error;
+use std::io;
 use std::path::Path;
 
 use chrono::NaiveDate;
@@ -170,7 +171,7 @@ pub(super) fn build_area_chart_from_buckets(
     let latest_date = dates
         .last()
         .copied()
-        .unwrap_or_else(|| NaiveDate::from_ymd_opt(1970, 1, 1).expect("valid fallback date"));
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no dates available"))?;
     let latest_date_label = latest_date.format(DATE_FORMAT).to_string();
     let daily_change_km2 = if occupied_area.len() >= 2 {
         Some(occupied_area[occupied_area.len() - 1] - occupied_area[occupied_area.len() - 2])
@@ -192,7 +193,9 @@ pub(super) fn build_area_chart_from_buckets(
     // Показываем суточные изменения только после базовой даты.
     let threshold =
         NaiveDate::from_ymd_opt(CHANGE_BASELINE.0, CHANGE_BASELINE.1, CHANGE_BASELINE.2)
-            .expect("valid threshold date");
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid change baseline date")
+            })?;
     let (change_dates, change_values) = dates
         .iter()
         .zip(smoothed_daily)
