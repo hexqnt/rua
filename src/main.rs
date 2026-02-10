@@ -469,6 +469,7 @@ fn build_download_links(
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() {
     let args = Args::parse();
     let archive_csv = args.archive_csv;
@@ -544,11 +545,11 @@ async fn main() {
                     return;
                 }
             };
-            if archive_csv {
-                if let Err(err) = remove_csv_file(&output_history_csv) {
-                    error(&err);
-                    return;
-                }
+            if archive_csv
+                && let Err(err) = remove_csv_file(&output_history_csv)
+            {
+                error(&err);
+                return;
             }
 
             let forecast = match train_forecast_from_buckets(&buckets, horizon_days, &model_config)
@@ -582,7 +583,7 @@ async fn main() {
             if let Err(err) = report::draw_area_chart_with_forecast_from_buckets(
                 &buckets,
                 &output_html,
-                Some(overlay),
+                Some(&overlay),
                 Some(download_links),
                 minify_html,
             ) {
@@ -594,8 +595,10 @@ async fn main() {
                 "Saved forecast to {} and {}",
                 if archive_csv {
                     archive_path_for(&output_forecast_csv)
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|_| output_forecast_csv.display().to_string())
+                        .map_or_else(
+                            |_| output_forecast_csv.display().to_string(),
+                            |path| path.display().to_string(),
+                        )
                 } else {
                     output_forecast_csv.display().to_string()
                 },
@@ -691,8 +694,10 @@ async fn main() {
                 "Saved forecast to {}",
                 if archive_csv {
                     archive_path_for(&output_csv)
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|_| output_csv.display().to_string())
+                        .map_or_else(
+                            |_| output_csv.display().to_string(),
+                            |path| path.display().to_string(),
+                        )
                 } else {
                     output_csv.display().to_string()
                 }
@@ -749,7 +754,7 @@ async fn main() {
             if let Err(err) = report::draw_area_chart_with_forecast(
                 &csv,
                 &output_html,
-                Some(overlay),
+                Some(&overlay),
                 Some(download_links),
                 minify_html,
             ) {

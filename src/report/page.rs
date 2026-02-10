@@ -25,6 +25,7 @@ const FLAG_CDN_BASE: &str = "https://flagcdn.com/24x18/";
 const UNIT_THOUSAND_KM2: &str = "тыс. км²";
 const UNIT_KM2: &str = "км²";
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn render_plot_page(
     plot: &Plot,
     summary: &ChartSummary,
@@ -495,7 +496,7 @@ pub(super) fn render_plot_page(
                             "Прогноз — по среднему значению на конец горизонта."
                         }
                         script {
-                            (PreEscaped(r#"
+                            (PreEscaped(r"
                             (() => {
                                 const select = document.getElementById('ratio-sort');
                                 if (!select) return;
@@ -517,7 +518,7 @@ pub(super) fn render_plot_page(
                                 applySort();
                                 select.addEventListener('change', applySort);
                             })();
-                            "#))
+                            "))
                         }
                     }
                     footer {
@@ -551,8 +552,7 @@ fn build_country_rows(latest_area_sq_km: f64, forecast_area_sq_km: Option<f64>) 
             let ratio_value = latest_area_sq_km / *area;
             let forecast_ratio = forecast_area_sq_km
                 .map(|forecast_area| forecast_area / *area)
-                .map(|value| format!("{value:.2}x"))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |value| format!("{value:.2}x"));
             CountryRow {
                 name,
                 flag,
@@ -569,8 +569,7 @@ fn build_country_rows(latest_area_sq_km: f64, forecast_area_sq_km: Option<f64>) 
             let ratio_value = latest_area_sq_km / *area;
             let forecast_ratio = forecast_area_sq_km
                 .map(|forecast_area| forecast_area / *area)
-                .map(|value| format!("{value:.2}x"))
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |value| format!("{value:.2}x"));
             CountryRow {
                 name,
                 flag,

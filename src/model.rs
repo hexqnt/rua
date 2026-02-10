@@ -30,6 +30,34 @@ const LARGE_COST: f64 = 1e30;
 const CONFIDENCE_Z: f64 = 1.96;
 const TRAINING_START: (i32, u32, u32) = (2022, 11, 22);
 
+fn usize_to_i64(value: usize, context: &str) -> Option<i64> {
+    i64::try_from(value).map_or_else(
+        |_| {
+            tracing::warn!(
+                value,
+                context,
+                "usize value exceeds i64::MAX; truncating forecast horizon",
+            );
+            None
+        },
+        Some,
+    )
+}
+
+fn usize_to_f64(value: usize, context: &str) -> f64 {
+    u32::try_from(value).map_or_else(
+        |_| {
+            tracing::warn!(
+                value,
+                context,
+                "usize value exceeds u32::MAX; clamping conversion to f64",
+            );
+            f64::from(u32::MAX)
+        },
+        f64::from,
+    )
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ModelConfig {
     pub max_iters: u64,
@@ -360,7 +388,10 @@ impl FittedModel {
             let y_var = (cov[0][0] + r).max(0.0);
             let std = y_var.sqrt();
 
-            let day = self.last_date + Duration::days(step as i64);
+            let Some(step_days) = usize_to_i64(step, "fitted_model_forecast") else {
+                break;
+            };
+            let day = self.last_date + Duration::days(step_days);
             dates.push(day);
             mean.push(y_mean * self.scale);
             variance.push(y_var * self.scale * self.scale);
@@ -397,14 +428,17 @@ impl TrendFilterModel {
         let phi = self.damping.clamp(0.0, 1.0);
 
         for step in 1..=horizon_days {
-            let step_f = step as f64;
+            let step_f = usize_to_f64(step, "trend_filter_forecast");
             let sum_phi = if (phi - 1.0).abs() < 1e-12 {
                 step_f
             } else {
                 (1.0 - phi.powf(step_f)) / (1.0 - phi)
             };
             let mean_scaled = last + slope * sum_phi;
-            let day = self.last_date + Duration::days(step as i64);
+            let Some(step_days) = usize_to_i64(step, "trend_filter_forecast") else {
+                break;
+            };
+            let day = self.last_date + Duration::days(step_days);
             let var = (sum_phi * sum_phi).mul_add(slope_var, resid_var).max(0.0);
             let std = var.sqrt();
 
@@ -680,7 +714,7 @@ fn stddev(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 1.0;
     }
-    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let mean = values.iter().sum::<f64>() / usize_to_f64(values.len(), "stddev");
     let var = values
         .iter()
         .map(|value| {
@@ -688,7 +722,7 @@ fn stddev(values: &[f64]) -> f64 {
             diff * diff
         })
         .sum::<f64>()
-        / values.len() as f64;
+        / usize_to_f64(values.len(), "stddev");
     var.sqrt().max(1e-6)
 }
 
@@ -733,7 +767,11 @@ fn volatility_weights(series: &[f64]) -> Vec<f64> {
         let window = &diffs[start..=idx];
         let sum: f64 = window.iter().sum();
         let count = window.len();
-        *slot = if count > 0 { sum / count as f64 } else { 0.0 };
+        *slot = if count > 0 {
+            sum / usize_to_f64(count, "volatility_weights")
+        } else {
+            0.0
+        };
     }
     vol[0] = vol[1];
 

@@ -16,6 +16,7 @@ const CSV_HEADER: &str = "time_index,hash,area,percent,area_type\n";
 const FETCH_AREAS_CAPACITY: usize = 5000;
 const FETCH_CONCURRENCY: usize = 4;
 
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
 pub struct Area {
     #[serde(skip_deserializing)]

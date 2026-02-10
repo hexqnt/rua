@@ -34,6 +34,7 @@ impl std::error::Error for FetchError {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct AreaItem {
     pub id: i64,

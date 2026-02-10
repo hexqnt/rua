@@ -62,6 +62,7 @@ struct CsvRow {
     time_index: String,
     hash: String,
     area: f64,
+    #[allow(dead_code)]
     percent: f64,
     #[serde(alias = "type", alias = "area_type")]
     area_type: String,
@@ -81,7 +82,7 @@ impl DailyAccumulator {
     }
 
     fn mean(&self) -> Option<f64> {
-        (self.count > 0).then_some(self.sum / self.count as f64)
+        (self.count > 0).then_some(self.sum / f64::from(self.count))
     }
 }
 
@@ -94,7 +95,7 @@ pub struct AreaBuckets {
 
 impl AreaBuckets {
     /// Добавляет строку CSV в соответствующий дневной бакет.
-    fn ingest_with_date(&mut self, row: CsvRow, date: NaiveDate) -> Result<(), Box<dyn Error>> {
+    fn ingest_with_date(&mut self, row: &CsvRow, date: NaiveDate) {
         match row.area_type.as_str() {
             AREA_TYPE_OCCUPIED => {
                 self.ru.entry(date).or_default().add(row.area);
@@ -104,8 +105,6 @@ impl AreaBuckets {
             }
             _ => {} // Игнорируем прочие категории.
         }
-
-        Ok(())
     }
 }
 
@@ -119,7 +118,7 @@ pub fn load_area_buckets(csv_path: &Path) -> Result<AreaBuckets, Box<dyn Error>>
             let row = row?;
             let datetime = parse_time_index_with_hint(&row.time_index, &mut hint)
                 .map_err(|err| format!("failed to parse time_index '{}': {err}", row.time_index))?;
-            acc.ingest_with_date(row, datetime.date_naive())?;
+            acc.ingest_with_date(&row, datetime.date_naive());
             Ok::<_, Box<dyn Error>>(acc)
         })
 }
@@ -143,9 +142,18 @@ pub fn build_occupied_series(
         .copied()
         .ok_or_else(|| ERROR_NO_DATA.to_string())?;
 
-    let span_days = (last_date - first_date).num_days() as usize;
+    let span_days = (last_date - first_date).num_days();
+    if span_days < 0 {
+        tracing::warn!(
+            first_date = %first_date,
+            last_date = %last_date,
+            span_days,
+            "Negative date span while building series; returning error",
+        );
+        return Err("negative date span".into());
+    }
     let dates: Vec<_> = (0..=span_days)
-        .map(|offset| first_date + Duration::days(offset as i64))
+        .map(|offset| first_date + Duration::days(offset))
         .collect();
 
     let ru_values = interpolate_series(&dates, &buckets.ru);
@@ -222,8 +230,29 @@ fn interpolate_series(dates: &[NaiveDate], source: &DailyBuckets) -> Vec<f64> {
                     let gap = idx - start;
                     if gap > 1 {
                         for (offset, slot) in ((start + 1)..idx).enumerate() {
-                            let ratio = (offset as f64 + 1.0) / gap as f64;
-                            values[slot] = Some(start_val + (end_val - start_val) * ratio);
+                            let numerator: f64 = u32::try_from(offset + 1).map_or_else(
+                                |_| {
+                                    tracing::warn!(
+                                        offset = offset + 1,
+                                        "Interpolation offset exceeds u32::MAX; clamping ratio",
+                                    );
+                                    f64::from(u32::MAX)
+                                },
+                                f64::from,
+                            );
+                            let denominator: f64 = u32::try_from(gap).map_or_else(
+                                |_| {
+                                    tracing::warn!(
+                                        gap,
+                                        "Interpolation gap exceeds u32::MAX; clamping ratio",
+                                    );
+                                    f64::from(u32::MAX)
+                                },
+                                f64::from,
+                            );
+                            let ratio = numerator / denominator;
+                            values[slot] =
+                                Some(f64::mul_add(end_val - start_val, ratio, start_val));
                         }
                     }
                 }

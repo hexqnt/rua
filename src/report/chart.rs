@@ -1,5 +1,6 @@
 //! Подготовка данных и генерация Plotly-графика.
 
+use std::cmp::Ordering;
 use std::error::Error;
 use std::io;
 use std::path::Path;
@@ -139,18 +140,33 @@ fn rgba(color: (u8, u8, u8, f64)) -> Rgba {
     Rgba::new(color.0, color.1, color.2, color.3)
 }
 
+fn usize_to_f64(value: usize, context: &str) -> f64 {
+    u32::try_from(value).map_or_else(
+        |_| {
+            tracing::warn!(
+                value,
+                context,
+                "usize value exceeds u32::MAX; clamping conversion to f64",
+            );
+            f64::from(u32::MAX)
+        },
+        f64::from,
+    )
+}
+
 /// Строит Plotly-график (и возвращает последний уровень площади) без прогноза.
 pub(super) fn build_area_chart(
     csv_path: &Path,
-    forecast: Option<ForecastOverlay>,
+    forecast: Option<&ForecastOverlay>,
 ) -> Result<ChartOutput, Box<dyn Error>> {
     let buckets = load_area_buckets(csv_path)?;
     build_area_chart_from_buckets(&buckets, forecast)
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn build_area_chart_from_buckets(
     buckets: &AreaBuckets,
-    forecast: Option<ForecastOverlay>,
+    forecast: Option<&ForecastOverlay>,
 ) -> Result<ChartOutput, Box<dyn Error>> {
     let (dates, occupied_area) = build_occupied_series(buckets)?;
     let area_dates = dates
@@ -224,7 +240,7 @@ pub(super) fn build_area_chart_from_buckets(
             .y_axis(AXIS_MAIN_Y),
     );
 
-    let forecast_ref = forecast.as_ref();
+    let forecast_ref = forecast;
     if let Some(forecast) = forecast_ref
         && !forecast.dates.is_empty()
     {
@@ -536,6 +552,7 @@ pub(super) fn build_area_chart_from_buckets(
 }
 
 /// Находит последний локальный максимум за год для потенциальной пометки на графике.
+#[allow(dead_code)]
 fn peak_annotation(values: &[f64]) -> Option<(usize, f64)> {
     const OFFSET: usize = 60;
     if values.len() <= OFFSET {
@@ -589,7 +606,7 @@ fn centered_moving_average(values: &[f64], window: usize, min_periods: usize) ->
                 None
             } else {
                 let sum: f64 = values[start..=end].iter().copied().sum();
-                Some(sum / count as f64)
+                Some(sum / usize_to_f64(count, "centered_moving_average"))
             }
         })
         .collect()
@@ -608,11 +625,9 @@ fn downsample_min_max<X: Clone>(x: &[X], y: &[f64], max_points: usize) -> (Vec<X
     let interior_len = len.saturating_sub(2);
     let max_pairs = max_points.saturating_sub(2);
     let bucket_count = (max_pairs / 2).max(1);
-    let bucket_size = (interior_len as f64 / bucket_count as f64).ceil() as usize;
+    let bucket_size = interior_len.div_ceil(bucket_count);
 
-    if bucket_size == 0 {
-        indices.push(len - 1);
-    } else {
+    if bucket_size != 0 {
         let mut start = 1usize;
         while start < len - 1 {
             let end = (start + bucket_size).min(len - 1);
@@ -621,8 +636,7 @@ fn downsample_min_max<X: Clone>(x: &[X], y: &[f64], max_points: usize) -> (Vec<X
             let mut min_val = y[start];
             let mut max_val = y[start];
 
-            for idx in (start + 1)..end {
-                let val = y[idx];
+            for (idx, &val) in y.iter().enumerate().take(end).skip(start + 1) {
                 if val < min_val {
                     min_val = val;
                     min_idx = idx;
@@ -633,21 +647,22 @@ fn downsample_min_max<X: Clone>(x: &[X], y: &[f64], max_points: usize) -> (Vec<X
                 }
             }
 
-            if min_idx == max_idx {
-                indices.push(min_idx);
-            } else if min_idx < max_idx {
-                indices.push(min_idx);
-                indices.push(max_idx);
-            } else {
-                indices.push(max_idx);
-                indices.push(min_idx);
+            match min_idx.cmp(&max_idx) {
+                Ordering::Equal => indices.push(min_idx),
+                Ordering::Less => {
+                    indices.push(min_idx);
+                    indices.push(max_idx);
+                }
+                Ordering::Greater => {
+                    indices.push(max_idx);
+                    indices.push(min_idx);
+                }
             }
 
             start = end;
         }
-
-        indices.push(len - 1);
     }
+    indices.push(len - 1);
 
     indices.sort_unstable();
     indices.dedup();

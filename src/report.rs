@@ -32,6 +32,7 @@ impl Default for DownloadLinks {
 }
 
 /// Собирает и сохраняет Plotly-график без прогноза (как в прежней Python-версии).
+#[allow(dead_code)]
 pub fn draw_area_chart(csv_path: &Path, output_html: &Path) -> Result<(), Box<dyn Error>> {
     draw_area_chart_with_forecast(csv_path, output_html, None, None, false)
 }
@@ -39,29 +40,29 @@ pub fn draw_area_chart(csv_path: &Path, output_html: &Path) -> Result<(), Box<dy
 pub fn draw_area_chart_with_forecast(
     csv_path: &Path,
     output_html: &Path,
-    forecast: Option<ForecastOverlay>,
+    forecast: Option<&ForecastOverlay>,
     download_links: Option<DownloadLinks>,
     minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
     let chart::ChartOutput { plot, summary } = chart::build_area_chart(csv_path, forecast)?;
-    render_plot(plot, summary, output_html, download_links, minify_html)
+    render_plot(&plot, &summary, output_html, download_links, minify_html)
 }
 
 pub fn draw_area_chart_with_forecast_from_buckets(
     buckets: &AreaBuckets,
     output_html: &Path,
-    forecast: Option<ForecastOverlay>,
+    forecast: Option<&ForecastOverlay>,
     download_links: Option<DownloadLinks>,
     minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
     let chart::ChartOutput { plot, summary } =
         chart::build_area_chart_from_buckets(buckets, forecast)?;
-    render_plot(plot, summary, output_html, download_links, minify_html)
+    render_plot(&plot, &summary, output_html, download_links, minify_html)
 }
 
 fn render_plot(
-    plot: plotly::Plot,
-    summary: chart::ChartSummary,
+    plot: &plotly::Plot,
+    summary: &chart::ChartSummary,
     output_html: &Path,
     download_links: Option<DownloadLinks>,
     minify_html: bool,
@@ -75,7 +76,7 @@ fn render_plot(
 
     let generated_at = Utc::now();
     let links = download_links.unwrap_or_default();
-    let page = page::render_plot_page(&plot, &summary, generated_at, &links);
+    let page = page::render_plot_page(plot, summary, generated_at, &links);
     if minify_html {
         let cfg = minify_html::Cfg::new();
         let minified = minify_html::minify(page.as_bytes(), &cfg);
