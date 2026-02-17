@@ -272,9 +272,7 @@ pub fn train_from_series(
         sigma_obs,
         Some(&filter_weights),
     );
-    let last_date = *dates
-        .last()
-        .ok_or("dates are empty after validation")?;
+    let last_date = *dates.last().ok_or("dates are empty after validation")?;
 
     Ok(FittedModel {
         sigma_level,
@@ -352,9 +350,7 @@ pub fn train_trend_filter_from_series(
     if !slope_std.is_finite() || slope_std < floor_slope {
         slope_std = floor_slope;
     }
-    let last_date = *dates
-        .last()
-        .ok_or("dates are empty after validation")?;
+    let last_date = *dates.last().ok_or("dates are empty after validation")?;
 
     Ok(TrendFilterModel {
         trend,

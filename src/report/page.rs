@@ -24,6 +24,7 @@ const GITHUB_REPO_TEXT: &str = "github.com/hexqnt/rua";
 const FLAG_CDN_BASE: &str = "https://flagcdn.com/24x18/";
 const UNIT_THOUSAND_KM2: &str = "тыс. км²";
 const UNIT_KM2: &str = "км²";
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn render_plot_page(
@@ -522,7 +523,7 @@ pub(super) fn render_plot_page(
                         }
                     }
                     footer {
-                        "Сгенерировано: " (generated_label) " · RUA · Источник: "
+                        "Версия: " (APP_VERSION) " · Сгенерировано: " (generated_label) " · RUA · Источник: "
                         a href="https://deepstatemap.live" { "deepstatemap.live" }
                     }
                 }

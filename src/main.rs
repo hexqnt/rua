@@ -545,9 +545,7 @@ async fn main() {
                     return;
                 }
             };
-            if archive_csv
-                && let Err(err) = remove_csv_file(&output_history_csv)
-            {
+            if archive_csv && let Err(err) = remove_csv_file(&output_history_csv) {
                 error(&err);
                 return;
             }
@@ -594,11 +592,10 @@ async fn main() {
             success(&format!(
                 "Saved forecast to {} and {}",
                 if archive_csv {
-                    archive_path_for(&output_forecast_csv)
-                        .map_or_else(
-                            |_| output_forecast_csv.display().to_string(),
-                            |path| path.display().to_string(),
-                        )
+                    archive_path_for(&output_forecast_csv).map_or_else(
+                        |_| output_forecast_csv.display().to_string(),
+                        |path| path.display().to_string(),
+                    )
                 } else {
                     output_forecast_csv.display().to_string()
                 },
@@ -693,11 +690,10 @@ async fn main() {
             success(&format!(
                 "Saved forecast to {}",
                 if archive_csv {
-                    archive_path_for(&output_csv)
-                        .map_or_else(
-                            |_| output_csv.display().to_string(),
-                            |path| path.display().to_string(),
-                        )
+                    archive_path_for(&output_csv).map_or_else(
+                        |_| output_csv.display().to_string(),
+                        |path| path.display().to_string(),
+                    )
                 } else {
                     output_csv.display().to_string()
                 }

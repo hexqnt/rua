@@ -51,7 +51,12 @@ pub fn to_csv(areas: Vec<Area>, file_path: &Path) -> Result<(), String> {
     let mut writer = csv::Writer::from_writer(BufWriter::new(file));
     writer
         .write_record(CSV_HEADER.trim_end().split(','))
-        .map_err(|err| format!("Failed to write CSV header to {}: {err}", file_path.display()))?;
+        .map_err(|err| {
+            format!(
+                "Failed to write CSV header to {}: {err}",
+                file_path.display()
+            )
+        })?;
     for area in areas {
         writer
             .write_record([
