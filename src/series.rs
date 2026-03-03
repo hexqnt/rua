@@ -5,7 +5,7 @@ use std::error::Error;
 use std::path::Path;
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 const AREA_TYPE_OCCUPIED: &str = "occupied_after_24_02_2022";
 const AREA_TYPE_OTHER: &str = "other_territories";
@@ -57,15 +57,57 @@ impl TimeFormatHint {
 }
 
 /// Строка из CSV-экспорта API (поля используются выборочно).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AreaKind {
+    RuOccupied,
+    UaOtherTerritories,
+    Other,
+}
+
+fn deserialize_area_kind<'de, D>(deserializer: D) -> Result<AreaKind, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(match raw.as_str() {
+        AREA_TYPE_OCCUPIED => AreaKind::RuOccupied,
+        AREA_TYPE_OTHER => AreaKind::UaOtherTerritories,
+        _ => AreaKind::Other,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HashKind {
+    Ua,
+    Other,
+}
+
+fn deserialize_hash_kind<'de, D>(deserializer: D) -> Result<HashKind, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(if raw == UA_HASH {
+        HashKind::Ua
+    } else {
+        HashKind::Other
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct CsvRow {
     time_index: String,
-    hash: String,
+    #[serde(rename = "hash", deserialize_with = "deserialize_hash_kind")]
+    hash_kind: HashKind,
     area: f64,
     #[allow(dead_code)]
     percent: f64,
-    #[serde(alias = "type", alias = "area_type")]
-    area_type: String,
+    #[serde(
+        alias = "type",
+        alias = "area_type",
+        deserialize_with = "deserialize_area_kind"
+    )]
+    area_kind: AreaKind,
 }
 
 /// Аккумулятор для усреднения значений внутри одного дня.
@@ -96,11 +138,11 @@ pub struct AreaBuckets {
 impl AreaBuckets {
     /// Добавляет строку CSV в соответствующий дневной бакет.
     fn ingest_with_date(&mut self, row: &CsvRow, date: NaiveDate) {
-        match row.area_type.as_str() {
-            AREA_TYPE_OCCUPIED => {
+        match (row.area_kind, row.hash_kind) {
+            (AreaKind::RuOccupied, _) => {
                 self.ru.entry(date).or_default().add(row.area);
             }
-            AREA_TYPE_OTHER if row.hash == UA_HASH => {
+            (AreaKind::UaOtherTerritories, HashKind::Ua) => {
                 self.ua.entry(date).or_default().add(row.area);
             }
             _ => {} // Игнорируем прочие категории.

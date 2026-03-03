@@ -8,9 +8,11 @@ mod series;
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use std::fmt;
 use std::fs::{self, File};
 use std::io::IsTerminal;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -27,8 +29,6 @@ const DEFAULT_FORECAST_CSV: &str = "dist/forecast.csv";
 const CSV_ARCHIVE_EXTENSION: &str = "gz";
 const DEFAULT_FORECAST_HORIZON_DAYS: usize = 365;
 const DEFAULT_MODEL_CONFIG: &str = "config/model.toml";
-const DEFAULT_MODEL_NAME: &str = "trend-filter";
-const DEFAULT_MODEL_ALIAS: &str = "trend_filter";
 const FETCH_MAX_RETRIES: u32 = 10;
 const FETCH_DELAY_SECS: u64 = 2;
 
@@ -80,9 +80,9 @@ enum Command {
         #[arg(
             long = "horizon-days",
             value_name = "DAYS",
-            default_value_t = DEFAULT_FORECAST_HORIZON_DAYS
+            default_value_t = default_horizon_days()
         )]
-        horizon_days: usize,
+        horizon_days: NonZeroUsize,
         /// TOML-файл с параметрами модели.
         #[arg(
             long = "model-config",
@@ -123,9 +123,9 @@ enum Command {
         #[arg(
             long = "horizon-days",
             value_name = "DAYS",
-            default_value_t = DEFAULT_FORECAST_HORIZON_DAYS
+            default_value_t = default_horizon_days()
         )]
-        horizon_days: usize,
+        horizon_days: NonZeroUsize,
         /// TOML-файл с параметрами модели.
         #[arg(
             long = "model-config",
@@ -174,24 +174,126 @@ enum Command {
     },
 }
 
+const fn default_horizon_days() -> NonZeroUsize {
+    NonZeroUsize::new(DEFAULT_FORECAST_HORIZON_DAYS)
+        .expect("DEFAULT_FORECAST_HORIZON_DAYS must be non-zero")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+enum ModelKind {
+    #[default]
+    #[serde(alias = "trend_filter")]
+    TrendFilter,
+    Llt,
+}
+
+impl fmt::Display for ModelKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TrendFilter => f.write_str("trend-filter"),
+            Self::Llt => f.write_str("llt"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NonNegativeFinite(f64);
+
+impl NonNegativeFinite {
+    const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PositiveFinite(f64);
+
+impl PositiveFinite {
+    const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UnitIntervalFinite(f64);
+
+impl UnitIntervalFinite {
+    const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+fn parse_non_negative<'de, D>(deserializer: D) -> Result<Option<NonNegativeFinite>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<f64>::deserialize(deserializer)?;
+    raw.map(|value| {
+        if value.is_finite() && value >= 0.0 {
+            Ok(NonNegativeFinite(value))
+        } else {
+            Err(serde::de::Error::custom("must be a finite value >= 0"))
+        }
+    })
+    .transpose()
+}
+
+fn parse_positive<'de, D>(deserializer: D) -> Result<Option<PositiveFinite>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<f64>::deserialize(deserializer)?;
+    raw.map(|value| {
+        if value.is_finite() && value > 0.0 {
+            Ok(PositiveFinite(value))
+        } else {
+            Err(serde::de::Error::custom("must be a finite value > 0"))
+        }
+    })
+    .transpose()
+}
+
+fn parse_unit_interval<'de, D>(deserializer: D) -> Result<Option<UnitIntervalFinite>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<f64>::deserialize(deserializer)?;
+    raw.map(|value| {
+        if value.is_finite() && (0.0..=1.0).contains(&value) {
+            Ok(UnitIntervalFinite(value))
+        } else {
+            Err(serde::de::Error::custom(
+                "must be a finite value within 0..=1",
+            ))
+        }
+    })
+    .transpose()
+}
+
 #[derive(Debug, Deserialize)]
 struct ModelConfigFile {
-    model: Option<String>,
+    #[serde(default)]
+    model: ModelKind,
     trend_filter: Option<TrendFilterFile>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TrendFilterFile {
-    lambda: Option<f64>,
-    epsilon: Option<f64>,
+    #[serde(default, deserialize_with = "parse_non_negative")]
+    lambda: Option<NonNegativeFinite>,
+    #[serde(default, deserialize_with = "parse_positive")]
+    epsilon: Option<PositiveFinite>,
     #[serde(alias = "huber")]
-    huber_delta: Option<f64>,
-    damping: Option<f64>,
+    #[serde(default, deserialize_with = "parse_non_negative")]
+    huber_delta: Option<NonNegativeFinite>,
+    #[serde(default, deserialize_with = "parse_unit_interval")]
+    damping: Option<UnitIntervalFinite>,
 }
 
 #[derive(Debug, Clone)]
 struct ResolvedModelConfig {
-    name: String,
+    kind: ModelKind,
     trend_filter: model::TrendFilterConfig,
 }
 
@@ -224,16 +326,16 @@ fn resolve_trend_filter_config(overrides: Option<TrendFilterFile>) -> model::Tre
     let mut cfg = model::TrendFilterConfig::default();
     if let Some(overrides) = overrides {
         if let Some(lambda) = overrides.lambda {
-            cfg.lambda = lambda;
+            cfg.lambda = lambda.get();
         }
         if let Some(epsilon) = overrides.epsilon {
-            cfg.epsilon = epsilon;
+            cfg.epsilon = epsilon.get();
         }
         if let Some(huber_delta) = overrides.huber_delta {
-            cfg.huber_delta = huber_delta;
+            cfg.huber_delta = huber_delta.get();
         }
         if let Some(damping) = overrides.damping {
-            cfg.damping = damping;
+            cfg.damping = damping.get();
         }
     }
     cfg
@@ -241,25 +343,9 @@ fn resolve_trend_filter_config(overrides: Option<TrendFilterFile>) -> model::Tre
 
 fn default_resolved_config() -> ResolvedModelConfig {
     ResolvedModelConfig {
-        name: DEFAULT_MODEL_NAME.to_string(),
+        kind: ModelKind::TrendFilter,
         trend_filter: model::TrendFilterConfig::default(),
     }
-}
-
-fn validate_trend_filter_config(cfg: &model::TrendFilterConfig) -> Result<(), String> {
-    if !cfg.lambda.is_finite() || cfg.lambda < 0.0 {
-        return Err("trend_filter.lambda must be >= 0".to_string());
-    }
-    if !cfg.epsilon.is_finite() || cfg.epsilon <= 0.0 {
-        return Err("trend_filter.epsilon must be > 0".to_string());
-    }
-    if !cfg.huber_delta.is_finite() || cfg.huber_delta < 0.0 {
-        return Err("trend_filter.huber_delta must be >= 0".to_string());
-    }
-    if !cfg.damping.is_finite() || !(0.0..=1.0).contains(&cfg.damping) {
-        return Err("trend_filter.damping must be within 0..=1".to_string());
-    }
-    Ok(())
 }
 
 fn load_model_config(path: &Path) -> Result<ResolvedModelConfig, String> {
@@ -279,34 +365,23 @@ fn load_model_config(path: &Path) -> Result<ResolvedModelConfig, String> {
     let config: ModelConfigFile = toml::from_str(&raw)
         .map_err(|err| format!("Failed to parse model config {}: {err}", path.display()))?;
 
-    let mut model_name = config
-        .model
-        .unwrap_or_else(|| DEFAULT_MODEL_NAME.to_string())
-        .to_lowercase();
-    if model_name == DEFAULT_MODEL_ALIAS {
-        model_name = DEFAULT_MODEL_NAME.to_string();
-    }
-
-    match model_name.as_str() {
-        "trend-filter" => {
+    match config.model {
+        ModelKind::TrendFilter => {
             let trend_filter = resolve_trend_filter_config(config.trend_filter);
-            validate_trend_filter_config(&trend_filter)
-                .map_err(|err| format!("Invalid model config {}: {err}", path.display()))?;
             Ok(ResolvedModelConfig {
-                name: model_name,
+                kind: ModelKind::TrendFilter,
                 trend_filter,
             })
         }
-        "llt" => {
+        ModelKind::Llt => {
             if config.trend_filter.is_some() {
                 tracing::warn!("trend_filter section ignored for LLT model");
             }
             Ok(ResolvedModelConfig {
-                name: model_name,
+                kind: ModelKind::Llt,
                 trend_filter: model::TrendFilterConfig::default(),
             })
         }
-        _ => Err(format!("Unknown model name: {model_name}")),
     }
 }
 
@@ -332,35 +407,35 @@ fn generate_completions(shell: Shell, output: Option<PathBuf>) -> Result<(), Str
 
 fn train_forecast_from_csv(
     csv_path: &Path,
-    horizon_days: usize,
+    horizon_days: NonZeroUsize,
     model_config: &ResolvedModelConfig,
 ) -> Result<model::Forecast, String> {
-    match model_config.name.as_str() {
-        "trend-filter" => model::train_trend_filter_from_csv(csv_path, model_config.trend_filter)
-            .map(|fitted| fitted.forecast(horizon_days))
+    match model_config.kind {
+        ModelKind::TrendFilter => {
+            model::train_trend_filter_from_csv(csv_path, model_config.trend_filter)
+                .map(|fitted| fitted.forecast(horizon_days.get()))
+                .map_err(|err| err.to_string())
+        }
+        ModelKind::Llt => model::train_from_csv(csv_path, model::ModelConfig::default())
+            .map(|fitted| fitted.forecast(horizon_days.get()))
             .map_err(|err| err.to_string()),
-        "llt" => model::train_from_csv(csv_path, model::ModelConfig::default())
-            .map(|fitted| fitted.forecast(horizon_days))
-            .map_err(|err| err.to_string()),
-        _ => Err("Unknown model name".to_string()),
     }
 }
 
 fn train_forecast_from_buckets(
     buckets: &AreaBuckets,
-    horizon_days: usize,
+    horizon_days: NonZeroUsize,
     model_config: &ResolvedModelConfig,
 ) -> Result<model::Forecast, String> {
-    match model_config.name.as_str() {
-        "trend-filter" => {
+    match model_config.kind {
+        ModelKind::TrendFilter => {
             model::train_trend_filter_from_buckets(buckets, model_config.trend_filter)
-                .map(|fitted| fitted.forecast(horizon_days))
+                .map(|fitted| fitted.forecast(horizon_days.get()))
                 .map_err(|err| err.to_string())
         }
-        "llt" => model::train_from_buckets(buckets, model::ModelConfig::default())
-            .map(|fitted| fitted.forecast(horizon_days))
+        ModelKind::Llt => model::train_from_buckets(buckets, model::ModelConfig::default())
+            .map(|fitted| fitted.forecast(horizon_days.get()))
             .map_err(|err| err.to_string()),
-        _ => Err("Unknown model name".to_string()),
     }
 }
 
@@ -499,9 +574,9 @@ async fn main() {
             };
             tracing::info!(
                 mode = "run",
-                model = %model_config.name,
+                model = %model_config.kind,
                 archive_csv,
-                horizon_days,
+                horizon_days = horizon_days.get(),
                 model_config_path = %model_config_path.display(),
                 output_history_csv = %output_history_csv.display(),
                 output_forecast_csv = %output_forecast_csv.display(),
@@ -652,9 +727,9 @@ async fn main() {
             };
             tracing::info!(
                 mode = "forecast",
-                model = %model_config.name,
+                model = %model_config.kind,
                 archive_csv,
-                horizon_days,
+                horizon_days = horizon_days.get(),
                 model_config_path = %model_config_path.display(),
                 input_csv = %csv.display(),
                 output_csv = %output_csv.display(),
@@ -769,5 +844,40 @@ async fn main() {
             }
             success(&format!("Saved HTML to {}", output_html.display()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ModelConfigFile, ModelKind};
+
+    #[test]
+    fn model_kind_supports_aliases() {
+        let kebab: ModelConfigFile =
+            toml::from_str("model = \"trend-filter\"").expect("kebab-case model should parse");
+        assert_eq!(kebab.model, ModelKind::TrendFilter);
+
+        let alias: ModelConfigFile =
+            toml::from_str("model = \"trend_filter\"").expect("alias model should parse");
+        assert_eq!(alias.model, ModelKind::TrendFilter);
+
+        let llt: ModelConfigFile =
+            toml::from_str("model = \"llt\"").expect("LLT model should parse");
+        assert_eq!(llt.model, ModelKind::Llt);
+    }
+
+    #[test]
+    fn rejects_invalid_trend_filter_values_during_parse() {
+        let err = toml::from_str::<ModelConfigFile>(
+            "model = \"trend-filter\"\n[trend_filter]\ndamping = 1.5",
+        )
+        .expect_err("damping out of range should fail parse");
+        assert!(err.to_string().contains("0..=1"));
+
+        let err = toml::from_str::<ModelConfigFile>(
+            "model = \"trend-filter\"\n[trend_filter]\nepsilon = 0.0",
+        )
+        .expect_err("non-positive epsilon should fail parse");
+        assert!(err.to_string().contains("> 0"));
     }
 }

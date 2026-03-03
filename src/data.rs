@@ -98,9 +98,10 @@ pub async fn fetch_areas(
             .map_err(|err| format!("Failed to fetch URL: {err:?}"))?;
         let mut area: Vec<Area> = serde_json::from_slice(&content)
             .map_err(|err| format!("Failed to deserialize JSON: {err}"))?;
+        let time_index = DateTime::<Utc>::from_timestamp(timestamp, 0)
+            .ok_or_else(|| "Failed to build timestamp".to_string())?;
         for a in &mut area {
-            a.time_index = DateTime::<Utc>::from_timestamp(timestamp, 0)
-                .ok_or_else(|| "Failed to build timestamp".to_string())?;
+            a.time_index = time_index;
         }
         Ok::<Vec<Area>, String>(area)
     });
