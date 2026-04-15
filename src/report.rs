@@ -44,8 +44,19 @@ pub fn draw_area_chart_with_forecast(
     download_links: Option<DownloadLinks>,
     minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let chart::ChartOutput { plot, summary } = chart::build_area_chart(csv_path, forecast)?;
-    render_plot(&plot, &summary, output_html, download_links, minify_html)
+    let chart::ChartOutput {
+        main_plot,
+        yoy_plot,
+        summary,
+    } = chart::build_area_chart(csv_path, forecast)?;
+    render_plot(
+        &main_plot,
+        &yoy_plot,
+        &summary,
+        output_html,
+        download_links,
+        minify_html,
+    )
 }
 
 pub fn draw_area_chart_with_forecast_from_buckets(
@@ -55,13 +66,24 @@ pub fn draw_area_chart_with_forecast_from_buckets(
     download_links: Option<DownloadLinks>,
     minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let chart::ChartOutput { plot, summary } =
-        chart::build_area_chart_from_buckets(buckets, forecast)?;
-    render_plot(&plot, &summary, output_html, download_links, minify_html)
+    let chart::ChartOutput {
+        main_plot,
+        yoy_plot,
+        summary,
+    } = chart::build_area_chart_from_buckets(buckets, forecast)?;
+    render_plot(
+        &main_plot,
+        &yoy_plot,
+        &summary,
+        output_html,
+        download_links,
+        minify_html,
+    )
 }
 
 fn render_plot(
-    plot: &plotly::Plot,
+    main_plot: &plotly::Plot,
+    yoy_plot: &plotly::Plot,
     summary: &chart::ChartSummary,
     output_html: &Path,
     download_links: Option<DownloadLinks>,
@@ -76,7 +98,7 @@ fn render_plot(
 
     let generated_at = Utc::now();
     let links = download_links.unwrap_or_default();
-    let page = page::render_plot_page(plot, summary, generated_at, &links);
+    let page = page::render_plot_page(main_plot, yoy_plot, summary, generated_at, &links);
     if minify_html {
         let cfg = minify_html::Cfg::new();
         let minified = minify_html::minify(page.as_bytes(), &cfg);

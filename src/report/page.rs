@@ -28,12 +28,14 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn render_plot_page(
-    plot: &Plot,
+    main_plot: &Plot,
+    yoy_plot: &Plot,
     summary: &ChartSummary,
     generated_at: DateTime<Utc>,
     download_links: &DownloadLinks,
 ) -> String {
-    let plot_html = plot.to_inline_html(Some("area-plot"));
+    let main_plot_html = main_plot.to_inline_html(Some("area-plot"));
+    let yoy_plot_html = yoy_plot.to_inline_html(Some("yoy-plot"));
     let latest_area_sq_km = summary.latest_area_km2 * 1000.0;
     let forecast_area_sq_km = summary
         .forecast
@@ -164,6 +166,9 @@ pub(super) fn render_plot_page(
                         border: 1px solid var(--border);
                         overflow-x: auto;
                     }
+                    .card + .card {
+                        margin-top: 18px;
+                    }
                     .series-badges {
                         display: flex;
                         flex-wrap: wrap;
@@ -254,6 +259,16 @@ pub(super) fn render_plot_page(
                         border: 1px solid var(--border);
                         margin-top: 18px;
                     }
+                    .card-title {
+                        margin: 0 0 8px;
+                        font-size: 16px;
+                        font-weight: 600;
+                    }
+                    .card-subtitle {
+                        margin: 0 0 12px;
+                        font-size: 12px;
+                        color: var(--muted);
+                    }
                     .table-grid {
                         display: grid;
                         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -318,6 +333,10 @@ pub(super) fn render_plot_page(
                         width: 100%;
                         min-height: 640px;
                     }
+                    #yoy-plot {
+                        width: 100%;
+                        min-height: 620px;
+                    }
                     footer {
                         margin-top: 16px;
                         font-size: 12px;
@@ -332,6 +351,7 @@ pub(super) fn render_plot_page(
                     @media (max-width: 900px) {
                         .title { font-size: 22px; }
                         #area-plot { min-height: 560px; }
+                        #yoy-plot { min-height: 500px; }
                         .table-grid { grid-template-columns: 1fr; }
                         .hero-aside { width: 100%; align-items: flex-start; }
                     }
@@ -423,7 +443,43 @@ pub(super) fn render_plot_page(
                                 span class="badge forecast" { "Прогноз" }
                             }
                         }
-                        (PreEscaped(plot_html))
+                        (PreEscaped(main_plot_html))
+                    }
+                    div class="card" {
+                        h2 class="card-title" { "Год-к-году: среднее суточное изменение" }
+                        (PreEscaped(yoy_plot_html))
+                    }
+                    script {
+                        (PreEscaped(r"
+                        (() => {
+                            const applyGridDash = (plotId, layoutUpdate) => {
+                                const graph = document.getElementById(plotId);
+                                if (!graph || typeof Plotly === 'undefined') return;
+                                const relayout = () => {
+                                    Plotly.relayout(graph, layoutUpdate).catch(() => {});
+                                };
+                                if (graph.data && graph.layout) {
+                                    relayout();
+                                } else {
+                                    graph.on?.('plotly_afterplot', relayout);
+                                    setTimeout(relayout, 50);
+                                }
+                            };
+
+                            applyGridDash('area-plot', {
+                                'xaxis.griddash': 'dash',
+                                'xaxis2.griddash': 'dash',
+                                'yaxis.griddash': 'dash',
+                                'yaxis2.griddash': 'dash'
+                            });
+                            applyGridDash('yoy-plot', {
+                                'xaxis.griddash': 'dash',
+                                'xaxis2.griddash': 'dash',
+                                'yaxis.griddash': 'dash',
+                                'yaxis2.griddash': 'dash'
+                            });
+                        })();
+                        "))
                     }
                     section class="table-card" {
                         h2 class="table-title" { "Соотношение к территориям недружественных стран" }
