@@ -26,7 +26,7 @@ jobs:
       - name: Build report
         run: |
           rm -rf dist
-          cargo run --release -- run --archive-csv
+          cargo run --release -- --config config.deploy.toml
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

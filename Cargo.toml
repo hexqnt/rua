@@ -32,7 +32,6 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 futures = "0.3"
 bytes = "1.11"
 toml = "1.1.2"
-clap_complete = "4.6.2"
 flate2 = "1.1"
 minify-html = "0.18.1"
 

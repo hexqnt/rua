@@ -1,0 +1,3 @@
+mode = "run"
+archive_csv = true
+model = "trend-filter"

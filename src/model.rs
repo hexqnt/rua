@@ -807,7 +807,7 @@ fn load_target_series_from_buckets(
         .ok_or("invalid training start date")?;
     let mut filtered_dates = Vec::with_capacity(dates.len());
     let mut filtered_values = Vec::with_capacity(values.len());
-    for (date, value) in dates.into_iter().zip(values.into_iter()) {
+    for (date, value) in dates.into_iter().zip(values) {
         if date >= cutoff {
             filtered_dates.push(date);
             filtered_values.push(value);

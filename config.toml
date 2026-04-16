@@ -1,0 +1,24 @@
+mode = "run"
+archive_csv = false
+model = "trend-filter"
+
+[run]
+output_html = "dist/index.html"
+minify_html = true
+output_history_csv = "dist/history.csv"
+output_forecast_csv = "dist/forecast.csv"
+horizon_days = 365
+
+[download]
+output_csv = "dist/history.csv"
+
+[forecast]
+csv = "dist/history.csv"
+output_csv = "dist/forecast.csv"
+horizon_days = 365
+
+[render]
+csv = "dist/history.csv"
+forecast_csv = "dist/forecast.csv"
+output_html = "dist/index.html"
+minify_html = true

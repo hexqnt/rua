@@ -91,7 +91,7 @@ pub async fn fetch_areas(
     // Затем скачиваем площади по каждой отметке.
     let mut areas = Vec::with_capacity(FETCH_AREAS_CAPACITY);
     let mut pbar = pbar(Some(result.len()));
-    let stream = stream::iter(result.into_iter()).map(|area_item| async move {
+    let stream = stream::iter(result).map(|area_item| async move {
         let timestamp = area_item.id;
         let content = fetch::fetch_url(client, timestamp, max_retries, delay)
             .await

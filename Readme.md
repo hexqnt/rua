@@ -6,60 +6,88 @@
 
 ## Запуск
 
-В корневой директории проекта:
+RUA принимает только один runtime-параметр: путь к конфигу.
 
 ```sh
-cargo run -- run
+cargo run -- --config config.toml
+```
+
+## Формат `config.toml`
+
+Конфиг строгий: неизвестные поля приводят к ошибке.
+
+- `mode`: `run | download | forecast | render`.
+- `archive_csv`: архивировать CSV в `.csv.gz` и удалять исходные `.csv`.
+- `[run]`: полный режим (скачивание + прогноз + HTML).
+- `[download]`: только скачивание CSV.
+- `[forecast]`: обучение модели и сохранение прогноза в CSV.
+- `[render]`: сборка HTML по историческому CSV и CSV прогноза.
+- `model` и `[trend_filter]`: параметры модели (встроены в общий конфиг).
+
+Относительные пути из конфига резолвятся от текущей директории запуска.
+
+### Дефолтный конфиг
+
+В репозитории уже есть рабочий `config.toml` с дефолтами.
+
+```sh
+cargo run -- --config config.toml
 ```
 
 ## HTML-страница
 
-График сохраняется в `dist/index.html` как полноценная страница, собранная через `maud`.
-Путь можно переопределить флагом `--output-html`.
-По умолчанию HTML минифицируется с консервативными настройками `minify-html`.
-Флаг `--no-minify-html` отключает минификацию.
+По умолчанию HTML сохраняется в `dist/index.html`.
 Для отображения Plotly и флагов стран используется CDN (нужен интернет при открытии HTML).
 
-### Режимы запуска
+## Примеры конфигов
 
-- `run`: полный режим — скачивает данные с `deepstatemap.live`, сохраняет в `dist/history.csv`,
-  обучает модель по конфигу и строит HTML с прогнозом.
-- `download`: скачивает данные и сохраняет CSV по указанному пути.
-- `forecast`: обучает модель по конфигу и сохраняет CSV с прогнозом.
-- `render`: строит HTML по историческому CSV и CSV с прогнозом (прогноз обязателен).
-- `completions`: генерирует автодополнения для shell.
+### Полный режим с архивированием CSV
 
-### Архивация CSV
+```toml
+mode = "run"
+archive_csv = true
+model = "trend-filter"
 
-Флаг `--archive-csv` сохраняет данные только в виде архивов CSV (`.csv.gz`), удаляя исходные
-`.csv` после архивации, и подставляет ссылки на архивы в HTML-странице.
+[run]
+output_html = "dist/index.html"
+output_history_csv = "dist/history.csv"
+output_forecast_csv = "dist/forecast.csv"
+horizon_days = 365
+minify_html = true
+```
 
-Примеры:
+### Только скачивание CSV
 
-```sh
-# Полный режим (скачивание + прогноз + HTML)
-cargo run -- run
+```toml
+mode = "download"
 
-# Только загрузка CSV
-cargo run -- download --output-csv dist/history.csv
+[download]
+output_csv = "dist/history.csv"
+```
 
-# Прогноз в CSV
-cargo run -- forecast --csv dist/history.csv --output-csv dist/forecast.csv
+### Прогноз в CSV
 
-# HTML из CSV и прогноза
-cargo run -- render --csv dist/history.csv --forecast-csv dist/forecast.csv --output-html dist/custom.html
+```toml
+mode = "forecast"
+model = "trend-filter"
 
-# HTML без минификации
-cargo run -- render --csv dist/history.csv --forecast-csv dist/forecast.csv --no-minify-html
+[forecast]
+csv = "dist/history.csv"
+output_csv = "dist/forecast.csv"
+horizon_days = 365
+```
 
-# Полный режим с архивированием CSV
-cargo run -- run --archive-csv
+### HTML из CSV и прогноза
 
-# Автодополнения (stdout)
-cargo run -- completions bash > /tmp/rua.bash
+```toml
+mode = "render"
+archive_csv = false
 
-# Автодополнения в файл
-cargo run -- completions zsh --output dist/rua.zsh
+[render]
+csv = "dist/history.csv"
+forecast_csv = "dist/forecast.csv"
+output_html = "dist/custom.html"
+minify_html = false
 ```
 
 ## Прогноз
@@ -68,14 +96,3 @@ cargo run -- completions zsh --output dist/rua.zsh
 
 По умолчанию используется модель `trend-filter` и горизонт 365 дней. Обучение берёт данные
 с **2022-11-22** включительно.
-
-```sh
-# Прогноз с дефолтами (trend-filter)
-cargo run -- forecast
-
-# Явные пути
-cargo run -- forecast \
-  --csv dist/history.csv \
-  --output-csv dist/forecast.csv \
-  --horizon-days 365
-```

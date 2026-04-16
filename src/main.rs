@@ -5,7 +5,7 @@ mod model;
 mod report;
 mod series;
 
-use clap::{ArgAction, CommandFactory, Parser, Subcommand};
+use clap::Parser;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use serde::{Deserialize, Deserializer};
@@ -19,7 +19,6 @@ use std::time::Duration;
 use crate::constants::{AREA_THOUSANDS_DIVISOR, DATE_FORMAT};
 use crate::data::{fetch_areas, to_csv};
 use crate::series::AreaBuckets;
-use clap_complete::{Shell, generate};
 use tracing_subscriber::EnvFilter;
 
 const APP_ABOUT: &str = "RUA - Dynamic transition of territory in the Russian-Ukrainian conflict";
@@ -28,155 +27,163 @@ const DEFAULT_HISTORY_CSV: &str = "dist/history.csv";
 const DEFAULT_FORECAST_CSV: &str = "dist/forecast.csv";
 const CSV_ARCHIVE_EXTENSION: &str = "gz";
 const DEFAULT_FORECAST_HORIZON_DAYS: usize = 365;
-const DEFAULT_MODEL_CONFIG: &str = "config/model.toml";
 const FETCH_MAX_RETRIES: u32 = 10;
 const FETCH_DELAY_SECS: u64 = 2;
 
 #[derive(Parser, Debug)]
 #[command(name = "rua", about = APP_ABOUT)]
 struct Args {
-    /// Архивировать CSV в .csv.gz и использовать архивы в HTML.
-    /// Исходные CSV удаляются после успешной архивации.
-    #[arg(long = "archive-csv", global = true)]
-    archive_csv: bool,
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Полный режим: скачать данные, обучить модель и сгенерировать HTML с прогнозом.
-    Run {
-        /// Куда сохранить HTML.
-        #[arg(
-            short = 'o',
-            long = "output-html",
-            value_name = "PATH",
-            default_value = DEFAULT_OUTPUT_HTML
-        )]
-        output_html: PathBuf,
-        /// Не минифицировать HTML (по умолчанию минифицируется).
-        #[arg(
-            long = "no-minify-html",
-            default_value_t = true,
-            action = ArgAction::SetFalse
-        )]
-        minify_html: bool,
-        /// Куда сохранить CSV с историческими данными.
-        #[arg(
-            long = "output-history-csv",
-            value_name = "PATH",
-            default_value = DEFAULT_HISTORY_CSV
-        )]
-        output_history_csv: PathBuf,
-        /// Куда сохранить CSV с прогнозом.
-        #[arg(
-            long = "output-forecast-csv",
-            value_name = "PATH",
-            default_value = DEFAULT_FORECAST_CSV
-        )]
-        output_forecast_csv: PathBuf,
-        /// Горизонт прогноза (в днях).
-        #[arg(
-            long = "horizon-days",
-            value_name = "DAYS",
-            default_value_t = default_horizon_days()
-        )]
-        horizon_days: NonZeroUsize,
-        /// TOML-файл с параметрами модели.
-        #[arg(
-            long = "model-config",
-            value_name = "PATH",
-            default_value = DEFAULT_MODEL_CONFIG
-        )]
-        model_config: PathBuf,
-    },
-    /// Скачать данные и сохранить CSV.
-    Download {
-        /// Куда сохранить CSV.
-        #[arg(
-            short = 'o',
-            long = "output-csv",
-            value_name = "PATH",
-            default_value = DEFAULT_HISTORY_CSV
-        )]
-        output_csv: PathBuf,
-    },
-    /// Обучить модель и сохранить прогноз в CSV.
-    Forecast {
-        /// CSV с историческими данными.
-        #[arg(
-            short = 'c',
-            long = "csv",
-            value_name = "PATH",
-            default_value = DEFAULT_HISTORY_CSV
-        )]
-        csv: PathBuf,
-        /// Куда сохранить CSV с прогнозом.
-        #[arg(
-            long = "output-csv",
-            value_name = "PATH",
-            default_value = DEFAULT_FORECAST_CSV
-        )]
-        output_csv: PathBuf,
-        /// Горизонт прогноза (в днях).
-        #[arg(
-            long = "horizon-days",
-            value_name = "DAYS",
-            default_value_t = default_horizon_days()
-        )]
-        horizon_days: NonZeroUsize,
-        /// TOML-файл с параметрами модели.
-        #[arg(
-            long = "model-config",
-            value_name = "PATH",
-            default_value = DEFAULT_MODEL_CONFIG
-        )]
-        model_config: PathBuf,
-    },
-    /// Сгенерировать HTML-страницу на основе CSV и прогноза.
-    Render {
-        /// CSV с историческими данными.
-        #[arg(
-            short = 'c',
-            long = "csv",
-            value_name = "PATH",
-            default_value = DEFAULT_HISTORY_CSV
-        )]
-        csv: PathBuf,
-        /// CSV с прогнозом (обязателен).
-        #[arg(long = "forecast-csv", value_name = "PATH")]
-        forecast_csv: PathBuf,
-        /// Куда сохранить HTML.
-        #[arg(
-            short = 'o',
-            long = "output-html",
-            value_name = "PATH",
-            default_value = DEFAULT_OUTPUT_HTML
-        )]
-        output_html: PathBuf,
-        /// Не минифицировать HTML (по умолчанию минифицируется).
-        #[arg(
-            long = "no-minify-html",
-            default_value_t = true,
-            action = ArgAction::SetFalse
-        )]
-        minify_html: bool,
-    },
-    /// Сгенерировать файлы автодополнения для shell.
-    Completions {
-        /// Целевой shell.
-        #[arg(value_enum)]
-        shell: Shell,
-        /// Куда сохранить файл (если не указано — stdout).
-        #[arg(short = 'o', long = "output", value_name = "PATH")]
-        output: Option<PathBuf>,
-    },
+    /// TOML-файл с параметрами запуска.
+    #[arg(long = "config", value_name = "PATH")]
+    config: PathBuf,
 }
 
 const fn default_horizon_days() -> NonZeroUsize {
     NonZeroUsize::new(DEFAULT_FORECAST_HORIZON_DAYS)
         .expect("DEFAULT_FORECAST_HORIZON_DAYS must be non-zero")
+}
+
+const fn default_minify_html() -> bool {
+    true
+}
+
+fn default_output_html() -> PathBuf {
+    PathBuf::from(DEFAULT_OUTPUT_HTML)
+}
+
+fn default_history_csv() -> PathBuf {
+    PathBuf::from(DEFAULT_HISTORY_CSV)
+}
+
+fn default_forecast_csv() -> PathBuf {
+    PathBuf::from(DEFAULT_FORECAST_CSV)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Mode {
+    Run,
+    Download,
+    Forecast,
+    Render,
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Run => f.write_str("run"),
+            Self::Download => f.write_str("download"),
+            Self::Forecast => f.write_str("forecast"),
+            Self::Render => f.write_str("render"),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppConfigFile {
+    mode: Mode,
+    #[serde(default)]
+    archive_csv: bool,
+    #[serde(default)]
+    run: RunConfigFile,
+    #[serde(default)]
+    download: DownloadConfigFile,
+    #[serde(default)]
+    forecast: ForecastConfigFile,
+    #[serde(default)]
+    render: RenderConfigFile,
+    #[serde(default)]
+    model: ModelKind,
+    #[serde(default)]
+    trend_filter: Option<TrendFilterFile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunConfigFile {
+    #[serde(default = "default_output_html")]
+    output_html: PathBuf,
+    #[serde(default = "default_minify_html")]
+    minify_html: bool,
+    #[serde(default = "default_history_csv")]
+    output_history_csv: PathBuf,
+    #[serde(default = "default_forecast_csv")]
+    output_forecast_csv: PathBuf,
+    #[serde(default = "default_horizon_days")]
+    horizon_days: NonZeroUsize,
+}
+
+impl Default for RunConfigFile {
+    fn default() -> Self {
+        Self {
+            output_html: default_output_html(),
+            minify_html: default_minify_html(),
+            output_history_csv: default_history_csv(),
+            output_forecast_csv: default_forecast_csv(),
+            horizon_days: default_horizon_days(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DownloadConfigFile {
+    #[serde(default = "default_history_csv")]
+    output_csv: PathBuf,
+}
+
+impl Default for DownloadConfigFile {
+    fn default() -> Self {
+        Self {
+            output_csv: default_history_csv(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForecastConfigFile {
+    #[serde(default = "default_history_csv")]
+    csv: PathBuf,
+    #[serde(default = "default_forecast_csv")]
+    output_csv: PathBuf,
+    #[serde(default = "default_horizon_days")]
+    horizon_days: NonZeroUsize,
+}
+
+impl Default for ForecastConfigFile {
+    fn default() -> Self {
+        Self {
+            csv: default_history_csv(),
+            output_csv: default_forecast_csv(),
+            horizon_days: default_horizon_days(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenderConfigFile {
+    #[serde(default = "default_history_csv")]
+    csv: PathBuf,
+    #[serde(default)]
+    forecast_csv: Option<PathBuf>,
+    #[serde(default = "default_output_html")]
+    output_html: PathBuf,
+    #[serde(default = "default_minify_html")]
+    minify_html: bool,
+}
+
+impl Default for RenderConfigFile {
+    fn default() -> Self {
+        Self {
+            csv: default_history_csv(),
+            forecast_csv: None,
+            output_html: default_output_html(),
+            minify_html: default_minify_html(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -272,13 +279,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
-struct ModelConfigFile {
-    #[serde(default)]
-    model: ModelKind,
-    trend_filter: Option<TrendFilterFile>,
-}
-
-#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TrendFilterFile {
     #[serde(default, deserialize_with = "parse_non_negative")]
     lambda: Option<NonNegativeFinite>,
@@ -289,6 +290,51 @@ struct TrendFilterFile {
     huber_delta: Option<NonNegativeFinite>,
     #[serde(default, deserialize_with = "parse_unit_interval")]
     damping: Option<UnitIntervalFinite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ModeConfig {
+    Run(RunConfig),
+    Download(DownloadConfig),
+    Forecast(ForecastConfig),
+    Render(RenderConfig),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunConfig {
+    output_html: PathBuf,
+    minify_html: bool,
+    output_history_csv: PathBuf,
+    output_forecast_csv: PathBuf,
+    horizon_days: NonZeroUsize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DownloadConfig {
+    output_csv: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ForecastConfig {
+    csv: PathBuf,
+    output_csv: PathBuf,
+    horizon_days: NonZeroUsize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderConfig {
+    csv: PathBuf,
+    forecast_csv: PathBuf,
+    output_html: PathBuf,
+    minify_html: bool,
+}
+
+#[derive(Debug, Clone)]
+struct AppConfig {
+    mode: Mode,
+    archive_csv: bool,
+    mode_config: ModeConfig,
+    model: ResolvedModelConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -341,68 +387,110 @@ fn resolve_trend_filter_config(overrides: Option<TrendFilterFile>) -> model::Tre
     cfg
 }
 
-fn default_resolved_config() -> ResolvedModelConfig {
-    ResolvedModelConfig {
-        kind: ModelKind::TrendFilter,
-        trend_filter: model::TrendFilterConfig::default(),
+fn resolve_model_config(
+    kind: ModelKind,
+    overrides: Option<TrendFilterFile>,
+) -> ResolvedModelConfig {
+    match kind {
+        ModelKind::TrendFilter => ResolvedModelConfig {
+            kind: ModelKind::TrendFilter,
+            trend_filter: resolve_trend_filter_config(overrides),
+        },
+        ModelKind::Llt => {
+            if overrides.is_some() {
+                tracing::warn!("trend_filter section ignored for LLT model");
+            }
+            ResolvedModelConfig {
+                kind: ModelKind::Llt,
+                trend_filter: model::TrendFilterConfig::default(),
+            }
+        }
     }
 }
 
-fn load_model_config(path: &Path) -> Result<ResolvedModelConfig, String> {
-    if !path.exists() {
-        if path == Path::new(DEFAULT_MODEL_CONFIG) {
-            tracing::info!(
-                "Model config {} not found, using built-in defaults",
-                path.display()
-            );
-            return Ok(default_resolved_config());
+fn parse_app_config(raw: &str, path: &Path) -> Result<AppConfigFile, String> {
+    toml::from_str(raw).map_err(|err| format!("Failed to parse config {}: {err}", path.display()))
+}
+
+fn resolve_runtime_path_from(path: &Path, cwd: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
+}
+
+fn resolve_runtime_path(path: &Path) -> Result<PathBuf, String> {
+    let cwd = std::env::current_dir()
+        .map_err(|err| format!("Failed to resolve current working directory: {err}"))?;
+    Ok(resolve_runtime_path_from(path, &cwd))
+}
+
+fn resolve_app_config(config: AppConfigFile, cwd: &Path) -> Result<AppConfig, String> {
+    let model = resolve_model_config(config.model, config.trend_filter);
+
+    let run = RunConfig {
+        output_html: resolve_runtime_path_from(&config.run.output_html, cwd),
+        minify_html: config.run.minify_html,
+        output_history_csv: resolve_runtime_path_from(&config.run.output_history_csv, cwd),
+        output_forecast_csv: resolve_runtime_path_from(&config.run.output_forecast_csv, cwd),
+        horizon_days: config.run.horizon_days,
+    };
+
+    let download = DownloadConfig {
+        output_csv: resolve_runtime_path_from(&config.download.output_csv, cwd),
+    };
+
+    let forecast = ForecastConfig {
+        csv: resolve_runtime_path_from(&config.forecast.csv, cwd),
+        output_csv: resolve_runtime_path_from(&config.forecast.output_csv, cwd),
+        horizon_days: config.forecast.horizon_days,
+    };
+
+    let render_mode = if let Some(path) = config.render.forecast_csv {
+        Some(RenderConfig {
+            csv: resolve_runtime_path_from(&config.render.csv, cwd),
+            forecast_csv: resolve_runtime_path_from(&path, cwd),
+            output_html: resolve_runtime_path_from(&config.render.output_html, cwd),
+            minify_html: config.render.minify_html,
+        })
+    } else {
+        None
+    };
+
+    let mode_config = match config.mode {
+        Mode::Run => ModeConfig::Run(run),
+        Mode::Download => ModeConfig::Download(download),
+        Mode::Forecast => ModeConfig::Forecast(forecast),
+        Mode::Render => {
+            let Some(render) = render_mode else {
+                return Err(
+                    "Field render.forecast_csv is required when mode = \"render\"".to_string(),
+                );
+            };
+            ModeConfig::Render(render)
         }
-        return Err(format!("Model config {} does not exist", path.display()));
+    };
+
+    Ok(AppConfig {
+        mode: config.mode,
+        archive_csv: config.archive_csv,
+        mode_config,
+        model,
+    })
+}
+
+fn load_app_config(path: &Path) -> Result<AppConfig, String> {
+    if !path.exists() {
+        return Err(format!("Config {} does not exist", path.display()));
     }
 
     let raw = fs::read_to_string(path)
-        .map_err(|err| format!("Failed to read model config {}: {err}", path.display()))?;
-    let config: ModelConfigFile = toml::from_str(&raw)
-        .map_err(|err| format!("Failed to parse model config {}: {err}", path.display()))?;
-
-    match config.model {
-        ModelKind::TrendFilter => {
-            let trend_filter = resolve_trend_filter_config(config.trend_filter);
-            Ok(ResolvedModelConfig {
-                kind: ModelKind::TrendFilter,
-                trend_filter,
-            })
-        }
-        ModelKind::Llt => {
-            if config.trend_filter.is_some() {
-                tracing::warn!("trend_filter section ignored for LLT model");
-            }
-            Ok(ResolvedModelConfig {
-                kind: ModelKind::Llt,
-                trend_filter: model::TrendFilterConfig::default(),
-            })
-        }
-    }
-}
-
-fn generate_completions(shell: Shell, output: Option<PathBuf>) -> Result<(), String> {
-    let mut cmd = Args::command();
-    let bin_name = cmd.get_name().to_string();
-    if let Some(path) = output {
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("Failed to create {}: {err}", parent.display()))?;
-        }
-        let mut file = File::create(&path)
-            .map_err(|err| format!("Failed to create {}: {err}", path.display()))?;
-        generate(shell, &mut cmd, bin_name, &mut file);
-    } else {
-        let mut stdout = std::io::stdout();
-        generate(shell, &mut cmd, bin_name, &mut stdout);
-    }
-    Ok(())
+        .map_err(|err| format!("Failed to read config {}: {err}", path.display()))?;
+    let parsed = parse_app_config(&raw, path)?;
+    let cwd = std::env::current_dir()
+        .map_err(|err| format!("Failed to resolve current working directory: {err}"))?;
+    resolve_app_config(parsed, &cwd)
 }
 
 fn train_forecast_from_csv(
@@ -547,46 +635,55 @@ fn build_download_links(
 #[allow(clippy::too_many_lines)]
 async fn main() {
     let args = Args::parse();
-    let archive_csv = args.archive_csv;
-    match args.command {
-        Command::Completions { shell, output } => {
-            if let Err(err) = generate_completions(shell, output) {
-                eprintln!("{err}");
-            }
+    init_logging();
+    headline(APP_ABOUT);
+
+    let config_path = match resolve_runtime_path(&args.config) {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!("{err}");
             return;
         }
-        Command::Run {
-            output_html,
-            minify_html,
-            output_history_csv,
-            output_forecast_csv,
-            horizon_days,
-            model_config: model_config_path,
-        } => {
-            init_logging();
-            headline(APP_ABOUT);
-            let model_config = match load_model_config(&model_config_path) {
-                Ok(config) => config,
-                Err(err) => {
-                    error(&err);
-                    return;
-                }
-            };
+    };
+    let app_config = match load_app_config(&config_path) {
+        Ok(config) => config,
+        Err(err) => {
+            error(&err);
+            return;
+        }
+    };
+
+    let AppConfig {
+        mode,
+        archive_csv,
+        mode_config,
+        model: model_config,
+    } = app_config;
+
+    tracing::info!(
+        mode = %mode,
+        archive_csv,
+        config_path = %config_path.display(),
+        model = %model_config.kind,
+        "Loaded configuration"
+    );
+
+    match mode_config {
+        ModeConfig::Run(config) => {
             tracing::info!(
                 mode = "run",
                 model = %model_config.kind,
                 archive_csv,
-                horizon_days = horizon_days.get(),
-                model_config_path = %model_config_path.display(),
-                output_history_csv = %output_history_csv.display(),
-                output_forecast_csv = %output_forecast_csv.display(),
-                output_html = %output_html.display(),
-                minify_html,
+                horizon_days = config.horizon_days.get(),
+                output_history_csv = %config.output_history_csv.display(),
+                output_forecast_csv = %config.output_forecast_csv.display(),
+                output_html = %config.output_html.display(),
+                minify_html = config.minify_html,
                 "Starting full pipeline"
             );
             let download_links = match build_download_links(
-                &output_history_csv,
-                &output_forecast_csv,
+                &config.output_history_csv,
+                &config.output_forecast_csv,
                 archive_csv,
             ) {
                 Ok(links) => links,
@@ -597,14 +694,14 @@ async fn main() {
             };
             info(&format!(
                 "Saving history CSV to {}",
-                output_history_csv.display()
+                config.output_history_csv.display()
             ));
-            if let Err(err) = download_to_csv(&output_history_csv).await {
+            if let Err(err) = download_to_csv(&config.output_history_csv).await {
                 error(&err);
                 return;
             }
             if archive_csv {
-                match archive_csv_file(&output_history_csv) {
+                match archive_csv_file(&config.output_history_csv) {
                     Ok(path) => success(&format!("Saved archive to {}", path.display())),
                     Err(err) => {
                         error(&err);
@@ -613,40 +710,40 @@ async fn main() {
                 }
             }
 
-            let buckets = match series::load_area_buckets(&output_history_csv) {
+            let buckets = match series::load_area_buckets(&config.output_history_csv) {
                 Ok(buckets) => buckets,
                 Err(err) => {
                     error(&format!("Failed to read history CSV: {err}"));
                     return;
                 }
             };
-            if archive_csv && let Err(err) = remove_csv_file(&output_history_csv) {
+            if archive_csv && let Err(err) = remove_csv_file(&config.output_history_csv) {
                 error(&err);
                 return;
             }
 
-            let forecast = match train_forecast_from_buckets(&buckets, horizon_days, &model_config)
-            {
-                Ok(forecast) => forecast,
-                Err(err) => {
-                    error(&format!("Failed to train forecast model: {err}"));
-                    return;
-                }
-            };
+            let forecast =
+                match train_forecast_from_buckets(&buckets, config.horizon_days, &model_config) {
+                    Ok(forecast) => forecast,
+                    Err(err) => {
+                        error(&format!("Failed to train forecast model: {err}"));
+                        return;
+                    }
+                };
 
-            if let Err(err) = model::write_forecast_csv(&forecast, &output_forecast_csv) {
+            if let Err(err) = model::write_forecast_csv(&forecast, &config.output_forecast_csv) {
                 error(&format!("Failed to write forecast CSV: {err}"));
                 return;
             }
             if archive_csv {
-                match archive_csv_file(&output_forecast_csv) {
+                match archive_csv_file(&config.output_forecast_csv) {
                     Ok(path) => success(&format!("Saved archive to {}", path.display())),
                     Err(err) => {
                         error(&err);
                         return;
                     }
                 }
-                if let Err(err) = remove_csv_file(&output_forecast_csv) {
+                if let Err(err) = remove_csv_file(&config.output_forecast_csv) {
                     error(&err);
                     return;
                 }
@@ -655,10 +752,10 @@ async fn main() {
             let overlay = build_forecast_overlay(&forecast);
             if let Err(err) = report::draw_area_chart_with_forecast_from_buckets(
                 &buckets,
-                &output_html,
+                &config.output_html,
                 Some(&overlay),
                 Some(download_links),
-                minify_html,
+                config.minify_html,
             ) {
                 error(&format!("Failed to render forecast chart: {err}"));
                 return;
@@ -667,35 +764,33 @@ async fn main() {
             success(&format!(
                 "Saved forecast to {} and {}",
                 if archive_csv {
-                    archive_path_for(&output_forecast_csv).map_or_else(
-                        |_| output_forecast_csv.display().to_string(),
+                    archive_path_for(&config.output_forecast_csv).map_or_else(
+                        |_| config.output_forecast_csv.display().to_string(),
                         |path| path.display().to_string(),
                     )
                 } else {
-                    output_forecast_csv.display().to_string()
+                    config.output_forecast_csv.display().to_string()
                 },
-                output_html.display()
+                config.output_html.display()
             ));
         }
-        Command::Download { output_csv } => {
-            init_logging();
-            headline(APP_ABOUT);
+        ModeConfig::Download(config) => {
             tracing::info!(
                 mode = "download",
                 archive_csv,
-                output_csv = %output_csv.display(),
+                output_csv = %config.output_csv.display(),
                 "Downloading history data"
             );
-            info(&format!("Saving CSV to {}", output_csv.display()));
-            if let Err(err) = download_to_csv(&output_csv).await {
+            info(&format!("Saving CSV to {}", config.output_csv.display()));
+            if let Err(err) = download_to_csv(&config.output_csv).await {
                 error(&err);
                 return;
             }
             if archive_csv {
-                match archive_csv_file(&output_csv) {
+                match archive_csv_file(&config.output_csv) {
                     Ok(path) => {
                         success(&format!("Saved archive to {}", path.display()));
-                        if let Err(err) = remove_csv_file(&output_csv) {
+                        if let Err(err) = remove_csv_file(&config.output_csv) {
                             error(&err);
                             return;
                         }
@@ -707,51 +802,37 @@ async fn main() {
                 }
             }
             if !archive_csv {
-                success(&format!("Saved CSV to {}", output_csv.display()));
+                success(&format!("Saved CSV to {}", config.output_csv.display()));
             }
         }
-        Command::Forecast {
-            csv,
-            output_csv,
-            horizon_days,
-            model_config: model_config_path,
-        } => {
-            init_logging();
-            headline(APP_ABOUT);
-            let model_config = match load_model_config(&model_config_path) {
-                Ok(config) => config,
-                Err(err) => {
-                    error(&err);
-                    return;
-                }
-            };
+        ModeConfig::Forecast(config) => {
             tracing::info!(
                 mode = "forecast",
                 model = %model_config.kind,
                 archive_csv,
-                horizon_days = horizon_days.get(),
-                model_config_path = %model_config_path.display(),
-                input_csv = %csv.display(),
-                output_csv = %output_csv.display(),
+                horizon_days = config.horizon_days.get(),
+                input_csv = %config.csv.display(),
+                output_csv = %config.output_csv.display(),
                 "Training forecast model"
             );
-            let forecast = match train_forecast_from_csv(&csv, horizon_days, &model_config) {
-                Ok(forecast) => forecast,
-                Err(err) => {
-                    error(&format!("Failed to train forecast model: {err}"));
-                    return;
-                }
-            };
+            let forecast =
+                match train_forecast_from_csv(&config.csv, config.horizon_days, &model_config) {
+                    Ok(forecast) => forecast,
+                    Err(err) => {
+                        error(&format!("Failed to train forecast model: {err}"));
+                        return;
+                    }
+                };
 
-            if let Err(err) = model::write_forecast_csv(&forecast, &output_csv) {
+            if let Err(err) = model::write_forecast_csv(&forecast, &config.output_csv) {
                 error(&format!("Failed to write forecast CSV: {err}"));
                 return;
             }
             if archive_csv {
-                match archive_csv_file(&output_csv) {
+                match archive_csv_file(&config.output_csv) {
                     Ok(path) => {
                         success(&format!("Saved archive to {}", path.display()));
-                        if let Err(err) = remove_csv_file(&output_csv) {
+                        if let Err(err) = remove_csv_file(&config.output_csv) {
                             error(&err);
                             return;
                         }
@@ -765,48 +846,42 @@ async fn main() {
             success(&format!(
                 "Saved forecast to {}",
                 if archive_csv {
-                    archive_path_for(&output_csv).map_or_else(
-                        |_| output_csv.display().to_string(),
+                    archive_path_for(&config.output_csv).map_or_else(
+                        |_| config.output_csv.display().to_string(),
                         |path| path.display().to_string(),
                     )
                 } else {
-                    output_csv.display().to_string()
+                    config.output_csv.display().to_string()
                 }
             ));
         }
-        Command::Render {
-            csv,
-            forecast_csv,
-            output_html,
-            minify_html,
-        } => {
-            init_logging();
-            headline(APP_ABOUT);
+        ModeConfig::Render(config) => {
             tracing::info!(
                 mode = "render",
                 archive_csv,
-                input_csv = %csv.display(),
-                forecast_csv = %forecast_csv.display(),
-                output_html = %output_html.display(),
-                minify_html,
+                input_csv = %config.csv.display(),
+                forecast_csv = %config.forecast_csv.display(),
+                output_html = %config.output_html.display(),
+                minify_html = config.minify_html,
                 "Rendering HTML report"
             );
-            let download_links = match build_download_links(&csv, &forecast_csv, archive_csv) {
-                Ok(links) => links,
-                Err(err) => {
-                    error(&err);
-                    return;
-                }
-            };
+            let download_links =
+                match build_download_links(&config.csv, &config.forecast_csv, archive_csv) {
+                    Ok(links) => links,
+                    Err(err) => {
+                        error(&err);
+                        return;
+                    }
+                };
             if archive_csv {
-                match archive_csv_file(&csv) {
+                match archive_csv_file(&config.csv) {
                     Ok(path) => success(&format!("Saved archive to {}", path.display())),
                     Err(err) => {
                         error(&err);
                         return;
                     }
                 }
-                match archive_csv_file(&forecast_csv) {
+                match archive_csv_file(&config.forecast_csv) {
                     Ok(path) => success(&format!("Saved archive to {}", path.display())),
                     Err(err) => {
                         error(&err);
@@ -814,7 +889,7 @@ async fn main() {
                     }
                 }
             }
-            let overlay = match load_forecast_overlay(&forecast_csv) {
+            let overlay = match load_forecast_overlay(&config.forecast_csv) {
                 Ok(overlay) => overlay,
                 Err(err) => {
                     error(&format!("Failed to read forecast CSV: {err}"));
@@ -823,61 +898,155 @@ async fn main() {
             };
 
             if let Err(err) = report::draw_area_chart_with_forecast(
-                &csv,
-                &output_html,
+                &config.csv,
+                &config.output_html,
                 Some(&overlay),
                 Some(download_links),
-                minify_html,
+                config.minify_html,
             ) {
                 error(&format!("Failed to render forecast chart: {err}"));
                 return;
             }
             if archive_csv {
-                if let Err(err) = remove_csv_file(&csv) {
+                if let Err(err) = remove_csv_file(&config.csv) {
                     error(&err);
                     return;
                 }
-                if let Err(err) = remove_csv_file(&forecast_csv) {
+                if let Err(err) = remove_csv_file(&config.forecast_csv) {
                     error(&err);
                     return;
                 }
             }
-            success(&format!("Saved HTML to {}", output_html.display()));
+            success(&format!("Saved HTML to {}", config.output_html.display()));
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelConfigFile, ModelKind};
+    use super::{
+        AppConfigFile, DownloadConfig, Mode, ModeConfig, ModelKind, RenderConfig,
+        resolve_app_config,
+    };
+    use std::path::Path;
 
     #[test]
     fn model_kind_supports_aliases() {
-        let kebab: ModelConfigFile =
-            toml::from_str("model = \"trend-filter\"").expect("kebab-case model should parse");
+        let kebab: AppConfigFile = toml::from_str("mode = \"run\"\nmodel = \"trend-filter\"")
+            .expect("kebab-case model should parse");
         assert_eq!(kebab.model, ModelKind::TrendFilter);
 
-        let alias: ModelConfigFile =
-            toml::from_str("model = \"trend_filter\"").expect("alias model should parse");
+        let alias: AppConfigFile = toml::from_str("mode = \"run\"\nmodel = \"trend_filter\"")
+            .expect("alias model should parse");
         assert_eq!(alias.model, ModelKind::TrendFilter);
 
-        let llt: ModelConfigFile =
-            toml::from_str("model = \"llt\"").expect("LLT model should parse");
+        let llt: AppConfigFile =
+            toml::from_str("mode = \"run\"\nmodel = \"llt\"").expect("LLT model should parse");
         assert_eq!(llt.model, ModelKind::Llt);
     }
 
     #[test]
     fn rejects_invalid_trend_filter_values_during_parse() {
-        let err = toml::from_str::<ModelConfigFile>(
-            "model = \"trend-filter\"\n[trend_filter]\ndamping = 1.5",
+        let err = toml::from_str::<AppConfigFile>(
+            "mode = \"run\"\nmodel = \"trend-filter\"\n[trend_filter]\ndamping = 1.5",
         )
         .expect_err("damping out of range should fail parse");
         assert!(err.to_string().contains("0..=1"));
 
-        let err = toml::from_str::<ModelConfigFile>(
-            "model = \"trend-filter\"\n[trend_filter]\nepsilon = 0.0",
+        let err = toml::from_str::<AppConfigFile>(
+            "mode = \"run\"\nmodel = \"trend-filter\"\n[trend_filter]\nepsilon = 0.0",
         )
         .expect_err("non-positive epsilon should fail parse");
         assert!(err.to_string().contains("> 0"));
+    }
+
+    #[test]
+    fn parses_minimal_default_config() {
+        let config: AppConfigFile =
+            toml::from_str("mode = \"run\"").expect("minimal config with mode should parse");
+        let resolved = resolve_app_config(config, Path::new("workspace"))
+            .expect("default config should resolve");
+
+        assert_eq!(resolved.mode, Mode::Run);
+        assert!(!resolved.archive_csv);
+        match resolved.mode_config {
+            ModeConfig::Run(run) => {
+                assert_eq!(
+                    run.output_html,
+                    Path::new("workspace").join("dist/index.html")
+                );
+                assert_eq!(
+                    run.output_history_csv,
+                    Path::new("workspace").join("dist/history.csv")
+                );
+                assert_eq!(
+                    run.output_forecast_csv,
+                    Path::new("workspace").join("dist/forecast.csv")
+                );
+            }
+            _ => panic!("expected run mode config"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_fields() {
+        let err = toml::from_str::<AppConfigFile>("mode = \"run\"\nunknown = 1")
+            .expect_err("unknown top-level field should fail parse");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_zero_horizon_days() {
+        let err =
+            toml::from_str::<AppConfigFile>("mode = \"forecast\"\n[forecast]\nhorizon_days = 0")
+                .expect_err("zero horizon should fail parse");
+        assert!(err.to_string().to_lowercase().contains("nonzero"));
+    }
+
+    #[test]
+    fn render_mode_requires_forecast_csv() {
+        let config: AppConfigFile = toml::from_str("mode = \"render\"")
+            .expect("render config without required field still parses");
+        let err = resolve_app_config(config, Path::new("workspace"))
+            .expect_err("render mode without forecast csv should fail resolve");
+        assert!(err.contains("render.forecast_csv"));
+    }
+
+    #[test]
+    fn resolves_paths_from_cwd() {
+        let config: AppConfigFile =
+            toml::from_str("mode = \"download\"\n[download]\noutput_csv = \"out/history.csv\"")
+                .expect("download config should parse");
+        let resolved =
+            resolve_app_config(config, Path::new("repo")).expect("config should resolve");
+
+        assert_eq!(resolved.mode, Mode::Download);
+        assert_eq!(
+            resolved.mode_config,
+            ModeConfig::Download(DownloadConfig {
+                output_csv: Path::new("repo").join("out/history.csv"),
+            })
+        );
+    }
+
+    #[test]
+    fn resolves_render_paths_from_cwd() {
+        let config: AppConfigFile = toml::from_str(
+            "mode = \"render\"\n[render]\ncsv = \"dist/history.csv\"\nforecast_csv = \"dist/forecast.csv\"\noutput_html = \"dist/custom.html\"",
+        )
+        .expect("render config should parse");
+        let resolved =
+            resolve_app_config(config, Path::new("repo")).expect("config should resolve");
+
+        assert_eq!(resolved.mode, Mode::Render);
+        assert_eq!(
+            resolved.mode_config,
+            ModeConfig::Render(RenderConfig {
+                csv: Path::new("repo").join("dist/history.csv"),
+                forecast_csv: Path::new("repo").join("dist/forecast.csv"),
+                output_html: Path::new("repo").join("dist/custom.html"),
+                minify_html: true,
+            })
+        );
     }
 }
