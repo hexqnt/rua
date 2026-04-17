@@ -18,7 +18,7 @@ use plotly::layout::{
 use plotly::{BoxPlot, Configuration, Plot, Scatter};
 
 use crate::constants::{AREA_THOUSANDS_DIVISOR, DATE_FORMAT};
-use crate::series::{AreaBuckets, build_occupied_series, load_area_buckets};
+use crate::series::{AreaBuckets, build_occupied_and_unspecified_series, load_area_buckets};
 
 #[derive(Clone, Debug)]
 pub struct ForecastOverlay {
@@ -26,6 +26,34 @@ pub struct ForecastOverlay {
     pub mean: Vec<f64>,
     pub lower: Vec<f64>,
     pub upper: Vec<f64>,
+}
+
+/// Параметры временных порогов для отрисовки графиков.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChartRenderConfig {
+    /// Дата начала отображения «Серой зоны» (верхний и нижний графики).
+    pub gray_zone_start: NaiveDate,
+    /// Дата начала отображения «Ср. изменения» (красная линия и YoY-блок).
+    pub avg_change_start: NaiveDate,
+}
+
+impl Default for ChartRenderConfig {
+    fn default() -> Self {
+        Self {
+            gray_zone_start: NaiveDate::from_ymd_opt(
+                DEFAULT_GRAY_ZONE_START.0,
+                DEFAULT_GRAY_ZONE_START.1,
+                DEFAULT_GRAY_ZONE_START.2,
+            )
+            .expect("DEFAULT_GRAY_ZONE_START must be valid"),
+            avg_change_start: NaiveDate::from_ymd_opt(
+                DEFAULT_AVG_CHANGE_START.0,
+                DEFAULT_AVG_CHANGE_START.1,
+                DEFAULT_AVG_CHANGE_START.2,
+            )
+            .expect("DEFAULT_AVG_CHANGE_START must be valid"),
+        }
+    }
 }
 
 /// Сводные метрики для HTML-страницы (единицы указаны в комментариях).
@@ -69,6 +97,13 @@ struct PreparedChangeSeries {
     values: Vec<f64>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct PreparedUnspecifiedChangePlot {
+    dates: Vec<String>,
+    reference_values: Vec<f64>,
+    values: Vec<f64>,
+}
+
 #[derive(Clone, Debug)]
 struct YoyYearSeries {
     year: i32,
@@ -99,7 +134,8 @@ const MAX_PLOT_POINTS: usize = 900;
 const UKRAINE_AREA_SQ_KM: f64 = 603_550.0;
 const CHANGE_SMOOTH_WINDOW: usize = 5;
 const CHANGE_SMOOTH_MIN_PERIODS: usize = 3;
-const CHANGE_BASELINE: (i32, u32, u32) = (2022, 11, 23);
+const DEFAULT_AVG_CHANGE_START: (i32, u32, u32) = (2022, 11, 23);
+const DEFAULT_GRAY_ZONE_START: (i32, u32, u32) = (2023, 2, 5);
 const AXIS_MAIN_X: &str = "x1";
 const AXIS_MAIN_Y: &str = "y1";
 const AXIS_CHANGE_X: &str = "x2";
@@ -115,6 +151,8 @@ const AXIS_REF_PIXEL: &str = "pixel";
 const LABEL_ACTUAL: &str = "Факт";
 const LABEL_FORECAST: &str = "Прогноз";
 const LABEL_CONFIDENCE: &str = "95%";
+const LABEL_UNSPECIFIED_BAND_MAIN: &str = "Серая зона";
+const LABEL_UNSPECIFIED_CHANGE: &str = "Ср. изменение СЗ";
 const LABEL_AVG_CHANGE: &str = "Ср. изменение";
 const LABEL_YOY_BAND: &str = "Исторический min/max";
 const LABEL_YOY_STDDEV: &str = "σ";
@@ -187,6 +225,10 @@ const YOY_BOX_MONTH_ANCHORS: [(u32, u32, u32); 12] = [
 const COLOR_AREA: (u8, u8, u8) = (36, 100, 166);
 const COLOR_AREA_TRANSPARENT: (u8, u8, u8, f64) = (36, 100, 166, 0.0);
 const COLOR_AREA_BAND: (u8, u8, u8, f64) = (36, 100, 166, 0.2);
+const COLOR_UNSPECIFIED_BAND: (u8, u8, u8, f64) = (128, 128, 128, 0.24);
+const COLOR_UNSPECIFIED_TRANSPARENT: (u8, u8, u8, f64) = (128, 128, 128, 0.0);
+const COLOR_UNSPECIFIED_CHANGE_LINE: (u8, u8, u8) = (120, 120, 120);
+const COLOR_UNSPECIFIED_CHANGE_FILL: (u8, u8, u8, f64) = (128, 128, 128, 0.18);
 const COLOR_CHANGE_FILL: (u8, u8, u8, f64) = (220, 82, 60, 0.25);
 const COLOR_CHANGE_LINE: (u8, u8, u8) = (200, 67, 46);
 const COLOR_YOY_LINE: (u8, u8, u8) = (36, 100, 166);
@@ -234,20 +276,46 @@ fn usize_to_f64(value: usize, context: &str) -> f64 {
 }
 
 /// Строит Plotly-график (и возвращает последний уровень площади) без прогноза.
+#[allow(dead_code)]
 pub(super) fn build_area_chart(
     csv_path: &Path,
     forecast: Option<&ForecastOverlay>,
 ) -> Result<ChartOutput, Box<dyn Error>> {
     let buckets = load_area_buckets(csv_path)?;
-    build_area_chart_from_buckets(&buckets, forecast)
+    let render_config = ChartRenderConfig::default();
+    build_area_chart_from_buckets_with_config(&buckets, forecast, render_config)
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(dead_code)]
 pub(super) fn build_area_chart_from_buckets(
     buckets: &AreaBuckets,
     forecast: Option<&ForecastOverlay>,
 ) -> Result<ChartOutput, Box<dyn Error>> {
-    let (dates, occupied_area) = build_occupied_series(buckets)?;
+    let render_config = ChartRenderConfig::default();
+    build_area_chart_from_buckets_with_config(buckets, forecast, render_config)
+}
+
+pub(super) fn build_area_chart_with_config(
+    csv_path: &Path,
+    forecast: Option<&ForecastOverlay>,
+    render_config: ChartRenderConfig,
+) -> Result<ChartOutput, Box<dyn Error>> {
+    let buckets = load_area_buckets(csv_path)?;
+    build_area_chart_from_buckets_with_config(&buckets, forecast, render_config)
+}
+
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::large_stack_frames)]
+pub(super) fn build_area_chart_from_buckets_with_config(
+    buckets: &AreaBuckets,
+    forecast: Option<&ForecastOverlay>,
+    render_config: ChartRenderConfig,
+) -> Result<ChartOutput, Box<dyn Error>> {
+    let occupied_series = build_occupied_and_unspecified_series(buckets)?;
+    let dates = occupied_series.dates;
+    let occupied_area = occupied_series.occupied;
+    let unspecified_area = occupied_series.unspecified;
     let area_dates = dates
         .iter()
         .map(|date| date.format(DATE_FORMAT).to_string())
@@ -278,10 +346,24 @@ pub(super) fn build_area_chart_from_buckets(
     } else {
         None
     };
+    let change_series =
+        prepare_change_series(&dates, &occupied_area, render_config.avg_change_start);
 
-    let change_series = prepare_change_series(&dates, &occupied_area)?;
-
-    let (area_dates_plot, area_km2_plot) =
+    let (area_dates_plot, area_km2_plot, area_upper_km2_plot) = prepare_unspecified_area_plot(
+        &dates,
+        &area_dates,
+        &area_km2,
+        &unspecified_area,
+        render_config.gray_zone_start,
+    );
+    let unspecified_change_plot = prepare_unspecified_change_plot(
+        &change_series,
+        &dates,
+        &unspecified_area,
+        render_config.gray_zone_start,
+        MAX_PLOT_POINTS / 2,
+    );
+    let (area_dates_actual_plot, area_km2_actual_plot) =
         downsample_min_max(&area_dates, &area_km2, MAX_PLOT_POINTS);
     let (change_dates_plot, change_values_plot) = downsample_min_max(
         &change_series.labels,
@@ -290,8 +372,29 @@ pub(super) fn build_area_chart_from_buckets(
     );
 
     let mut plot = Plot::new();
+    if !area_dates_plot.is_empty() {
+        plot.add_trace(
+            Scatter::new(area_dates_plot.clone(), area_km2_plot)
+                .mode(Mode::Lines)
+                .line(Line::new().color(rgba(COLOR_UNSPECIFIED_TRANSPARENT)))
+                .show_legend(false)
+                .x_axis(AXIS_MAIN_X)
+                .y_axis(AXIS_MAIN_Y),
+        );
+        plot.add_trace(
+            Scatter::new(area_dates_plot, area_upper_km2_plot)
+                .mode(Mode::Lines)
+                .fill(Fill::ToNextY)
+                .fill_color(rgba(COLOR_UNSPECIFIED_BAND))
+                .line(Line::new().color(rgba(COLOR_UNSPECIFIED_TRANSPARENT)))
+                .show_legend(true)
+                .name(LABEL_UNSPECIFIED_BAND_MAIN)
+                .x_axis(AXIS_MAIN_X)
+                .y_axis(AXIS_MAIN_Y),
+        );
+    }
     plot.add_trace(
-        Scatter::new(area_dates_plot, area_km2_plot)
+        Scatter::new(area_dates_actual_plot, area_km2_actual_plot)
             .mode(Mode::Lines)
             .line(
                 Line::new()
@@ -357,6 +460,38 @@ pub(super) fn build_area_chart_from_buckets(
             .x_axis(AXIS_CHANGE_X)
             .y_axis(AXIS_CHANGE_Y),
     );
+    if !unspecified_change_plot.dates.is_empty() {
+        plot.add_trace(
+            Scatter::new(
+                unspecified_change_plot.dates.clone(),
+                unspecified_change_plot.reference_values,
+            )
+            .mode(Mode::Lines)
+            .line(Line::new().color(rgba(COLOR_UNSPECIFIED_TRANSPARENT)))
+            .show_legend(false)
+            .x_axis(AXIS_CHANGE_X)
+            .y_axis(AXIS_CHANGE_Y),
+        );
+        plot.add_trace(
+            Scatter::new(
+                unspecified_change_plot.dates,
+                unspecified_change_plot.values,
+            )
+            .mode(Mode::Lines)
+            .fill(Fill::ToNextY)
+            .fill_color(rgba(COLOR_UNSPECIFIED_CHANGE_FILL))
+            .line(
+                Line::new()
+                    .color(rgb(COLOR_UNSPECIFIED_CHANGE_LINE))
+                    .width(LINE_WIDTH_CHANGE)
+                    .simplify(true),
+            )
+            .visible(Visible::LegendOnly)
+            .name(LABEL_UNSPECIFIED_CHANGE)
+            .x_axis(AXIS_CHANGE_X)
+            .y_axis(AXIS_CHANGE_Y),
+        );
+    }
 
     let mut annotations = Vec::new();
     if let (Some(last_date), Some(last_value)) = (area_dates.last(), area_km2.last()) {
@@ -510,8 +645,8 @@ pub(super) fn build_area_chart_from_buckets(
         .legend(
             Legend::new()
                 .orientation(Orientation::Horizontal)
-                .item_click(ItemClick::False)
-                .item_double_click(ItemClick::False)
+                .item_click(ItemClick::Toggle)
+                .item_double_click(ItemClick::ToggleOthers)
                 .x(LEGEND_X)
                 .x_anchor(Anchor::Center)
                 .y(LEGEND_Y)
@@ -627,19 +762,14 @@ pub(super) fn build_area_chart_from_buckets(
 fn prepare_change_series(
     dates: &[NaiveDate],
     occupied_area: &[f64],
-) -> Result<PreparedChangeSeries, io::Error> {
+    baseline: NaiveDate,
+) -> PreparedChangeSeries {
     let daily_changes = daily_change_series(occupied_area);
     let smoothed_daily = centered_moving_average(
         &daily_changes,
         CHANGE_SMOOTH_WINDOW,
         CHANGE_SMOOTH_MIN_PERIODS,
     );
-    // Показываем суточные изменения только после базовой даты.
-    let baseline = NaiveDate::from_ymd_opt(CHANGE_BASELINE.0, CHANGE_BASELINE.1, CHANGE_BASELINE.2)
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "invalid change baseline date")
-        })?;
-
     let (filtered_dates, values) = dates
         .iter()
         .zip(smoothed_daily)
@@ -651,12 +781,12 @@ fn prepare_change_series(
         .map(|date| date.format(DATE_FORMAT).to_string())
         .collect();
 
-    Ok(PreparedChangeSeries {
+    PreparedChangeSeries {
         baseline,
         dates: filtered_dates,
         labels,
         values,
-    })
+    }
 }
 
 fn build_yoy_chart(change_dates: &[NaiveDate], change_values: &[f64]) -> Plot {
@@ -789,6 +919,8 @@ fn build_yoy_layout() -> Layout {
 fn build_yoy_legend() -> Legend {
     Legend::new()
         .orientation(Orientation::Horizontal)
+        .item_click(ItemClick::Toggle)
+        .item_double_click(ItemClick::ToggleOthers)
         .x(LEGEND_X)
         .x_anchor(Anchor::Center)
         .y(LEGEND_Y)
@@ -1068,8 +1200,80 @@ fn centered_moving_average(values: &[f64], window: usize, min_periods: usize) ->
 
 /// Даунсемплит ряд, сохраняя минимум/максимум в бакетах, чтобы ускорить отрисовку.
 fn downsample_min_max<X: Clone>(x: &[X], y: &[f64], max_points: usize) -> (Vec<X>, Vec<f64>) {
-    if x.len() <= max_points || x.len() != y.len() || max_points < 3 {
+    if x.len() != y.len() {
         return (x.to_vec(), y.to_vec());
+    }
+    let indices = downsample_min_max_indices(y, max_points);
+
+    let mut out_x = Vec::with_capacity(indices.len());
+    let mut out_y = Vec::with_capacity(indices.len());
+    for idx in indices {
+        out_x.push(x[idx].clone());
+        out_y.push(y[idx]);
+    }
+
+    (out_x, out_y)
+}
+
+/// Даунсемплит две Y-серии с общим набором X-индексов для корректного `fill`.
+fn downsample_min_max_shared_x<X: Clone>(
+    x: &[X],
+    lower: &[f64],
+    upper: &[f64],
+    max_points: usize,
+) -> (Vec<X>, Vec<f64>, Vec<f64>) {
+    if x.len() != lower.len() || x.len() != upper.len() {
+        return (x.to_vec(), lower.to_vec(), upper.to_vec());
+    }
+    let lower_indices = downsample_min_max_indices(lower, max_points);
+    let upper_indices = downsample_min_max_indices(upper, max_points);
+    let indices = merge_sorted_indices(&lower_indices, &upper_indices);
+
+    let mut out_x = Vec::with_capacity(indices.len());
+    let mut out_lower = Vec::with_capacity(indices.len());
+    let mut out_upper = Vec::with_capacity(indices.len());
+    for idx in indices {
+        out_x.push(x[idx].clone());
+        out_lower.push(lower[idx]);
+        out_upper.push(upper[idx]);
+    }
+
+    (out_x, out_lower, out_upper)
+}
+
+fn merge_sorted_indices(left: &[usize], right: &[usize]) -> Vec<usize> {
+    let mut merged = Vec::with_capacity(left.len() + right.len());
+    let mut left_idx = 0usize;
+    let mut right_idx = 0usize;
+
+    while left_idx < left.len() && right_idx < right.len() {
+        match left[left_idx].cmp(&right[right_idx]) {
+            Ordering::Less => {
+                merged.push(left[left_idx]);
+                left_idx += 1;
+            }
+            Ordering::Greater => {
+                merged.push(right[right_idx]);
+                right_idx += 1;
+            }
+            Ordering::Equal => {
+                merged.push(left[left_idx]);
+                left_idx += 1;
+                right_idx += 1;
+            }
+        }
+    }
+
+    merged.extend_from_slice(&left[left_idx..]);
+    merged.extend_from_slice(&right[right_idx..]);
+
+    merged.dedup();
+    merged
+}
+
+fn downsample_min_max_indices(y: &[f64], max_points: usize) -> Vec<usize> {
+    if y.len() <= max_points || max_points < 3 {
+        return (0..y.len()).collect();
     }
 
     let len = y.len();
@@ -1121,23 +1325,242 @@ fn downsample_min_max<X: Clone>(x: &[X], y: &[f64], max_points: usize) -> (Vec<X
     indices.sort_unstable();
     indices.dedup();
 
-    let mut out_x = Vec::with_capacity(indices.len());
-    let mut out_y = Vec::with_capacity(indices.len());
-    for idx in indices {
-        out_x.push(x[idx].clone());
-        out_y.push(y[idx]);
+    indices
+}
+
+/// Фильтрует ряд по дате (включительно), сохраняя выравнивание X/Y.
+fn filter_series_from_date<X: Clone>(
+    dates: &[NaiveDate],
+    x: &[X],
+    y: &[f64],
+    start_date: NaiveDate,
+) -> (Vec<X>, Vec<f64>) {
+    if dates.len() != x.len() || x.len() != y.len() {
+        return (x.to_vec(), y.to_vec());
     }
 
+    let mut out_x = Vec::with_capacity(x.len());
+    let mut out_y = Vec::with_capacity(y.len());
+    for ((date, x_value), y_value) in dates.iter().zip(x).zip(y.iter().copied()) {
+        if *date >= start_date {
+            out_x.push(x_value.clone());
+            out_y.push(y_value);
+        }
+    }
     (out_x, out_y)
+}
+
+/// Фильтрует общий X и две Y-серии по дате (включительно).
+fn filter_shared_series_from_date<X: Clone>(
+    dates: &[NaiveDate],
+    x: &[X],
+    lower: &[f64],
+    upper: &[f64],
+    start_date: NaiveDate,
+) -> (Vec<X>, Vec<f64>, Vec<f64>) {
+    if dates.len() != x.len() || x.len() != lower.len() || lower.len() != upper.len() {
+        return (x.to_vec(), lower.to_vec(), upper.to_vec());
+    }
+
+    let mut out_x = Vec::with_capacity(x.len());
+    let mut out_lower = Vec::with_capacity(lower.len());
+    let mut out_upper = Vec::with_capacity(upper.len());
+    for (((date, x_value), lower_value), upper_value) in dates
+        .iter()
+        .zip(x)
+        .zip(lower.iter().copied())
+        .zip(upper.iter().copied())
+    {
+        if *date >= start_date {
+            out_x.push(x_value.clone());
+            out_lower.push(lower_value);
+            out_upper.push(upper_value);
+        }
+    }
+    (out_x, out_lower, out_upper)
+}
+
+fn prepare_unspecified_area_plot(
+    dates: &[NaiveDate],
+    area_dates: &[String],
+    area_km2: &[f64],
+    unspecified_area: &[f64],
+    start_date: NaiveDate,
+) -> (Vec<String>, Vec<f64>, Vec<f64>) {
+    let area_upper_km2 = area_km2
+        .iter()
+        .zip(unspecified_area.iter())
+        .map(|(occupied, unspecified)| occupied + unspecified / AREA_THOUSANDS_DIVISOR)
+        .collect_vec();
+    let (area_dates_filtered, area_km2_filtered, area_upper_km2_filtered) =
+        filter_shared_series_from_date(dates, area_dates, area_km2, &area_upper_km2, start_date);
+    downsample_min_max_shared_x(
+        &area_dates_filtered,
+        &area_km2_filtered,
+        &area_upper_km2_filtered,
+        MAX_PLOT_POINTS,
+    )
+}
+
+fn prepare_unspecified_change_plot(
+    reference_change_series: &PreparedChangeSeries,
+    dates: &[NaiveDate],
+    unspecified_area: &[f64],
+    start_date: NaiveDate,
+    max_points: usize,
+) -> PreparedUnspecifiedChangePlot {
+    let (dates_filtered, area_filtered) =
+        filter_series_from_date(dates, dates, unspecified_area, start_date);
+    let change_series = prepare_change_series(
+        &dates_filtered,
+        &area_filtered,
+        reference_change_series.baseline,
+    );
+    let reference_by_date: BTreeMap<NaiveDate, f64> = reference_change_series
+        .dates
+        .iter()
+        .copied()
+        .zip(reference_change_series.values.iter().copied())
+        .collect();
+    let (relative_dates, reference_values, relative_values) = change_series
+        .dates
+        .iter()
+        .zip(change_series.labels.iter().cloned())
+        .zip(change_series.values.iter().copied())
+        .filter_map(|((date, label), unspecified_change)| {
+            reference_by_date
+                .get(date)
+                .copied()
+                .map(|reference_change| {
+                    (
+                        label,
+                        reference_change,
+                        reference_change + unspecified_change,
+                    )
+                })
+        })
+        .fold(
+            (Vec::new(), Vec::new(), Vec::new()),
+            |mut acc, (date, reference, relative)| {
+                acc.0.push(date);
+                acc.1.push(reference);
+                acc.2.push(relative);
+                acc
+            },
+        );
+
+    let (relative_dates, reference_values, relative_values) = downsample_min_max_shared_x(
+        &relative_dates,
+        &reference_values,
+        &relative_values,
+        max_points,
+    );
+
+    PreparedUnspecifiedChangePlot {
+        dates: relative_dates,
+        reference_values,
+        values: relative_values,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        YOY_LINE_ALPHA_MAX, YOY_LINE_ALPHA_MIN, build_monthly_box_series, build_yoy_envelope,
-        build_yoy_series_by_year, build_yoy_stddev_series, normalize_to_yoy_month, yoy_line_alpha,
+        ChartRenderConfig, LABEL_ACTUAL, LABEL_UNSPECIFIED_BAND_MAIN, LABEL_UNSPECIFIED_CHANGE,
+        PreparedChangeSeries, YOY_LINE_ALPHA_MAX, YOY_LINE_ALPHA_MIN,
+        build_area_chart_from_buckets, build_area_chart_from_buckets_with_config,
+        build_monthly_box_series, build_yoy_envelope, build_yoy_series_by_year,
+        build_yoy_stddev_series, downsample_min_max_shared_x, normalize_to_yoy_month,
+        prepare_unspecified_change_plot, yoy_line_alpha,
     };
     use chrono::NaiveDate;
+    use serde_json::Value;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::series::load_area_buckets;
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn write_temp_csv(contents: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut path = std::env::temp_dir();
+        path.push(format!("rua_chart_test_{timestamp}_{counter}.csv"));
+        std::fs::write(&path, contents).expect("failed to write test csv");
+        path
+    }
+
+    fn remove_temp_csv(path: &Path) {
+        let _ = std::fs::remove_file(path);
+    }
+
+    const SAMPLE_GRAY_ZONE_CSV: &str = "time_index,hash,area,percent,area_type\n\
+2024-05-01 00:00:00 UTC,#a52714,100.0,0.0,occupied_after_24_02_2022\n\
+2024-05-01 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-05-01 00:00:00 UTC,#bcaaa4,10.0,0.0,unspecified\n\
+2024-05-02 00:00:00 UTC,#a52714,120.0,0.0,occupied_after_24_02_2022\n\
+2024-05-02 00:00:00 UTC,#01579b,30.0,0.0,other_territories\n\
+2024-05-02 00:00:00 UTC,#bcaaa4,15.0,0.0,unspecified\n\
+2024-05-03 00:00:00 UTC,#a52714,140.0,0.0,occupied_after_24_02_2022\n\
+2024-05-03 00:00:00 UTC,#01579b,35.0,0.0,other_territories\n\
+2024-05-03 00:00:00 UTC,#bcaaa4,25.0,0.0,unspecified\n";
+
+    const SAMPLE_GRAY_ZONE_THRESHOLD_CSV: &str = "time_index,hash,area,percent,area_type\n\
+2023-02-04 00:00:00 UTC,#a52714,100.0,0.0,occupied_after_24_02_2022\n\
+2023-02-04 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2023-02-04 00:00:00 UTC,#bcaaa4,10.0,0.0,unspecified\n\
+2023-02-05 00:00:00 UTC,#a52714,110.0,0.0,occupied_after_24_02_2022\n\
+2023-02-05 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2023-02-05 00:00:00 UTC,#bcaaa4,15.0,0.0,unspecified\n\
+2023-02-06 00:00:00 UTC,#a52714,120.0,0.0,occupied_after_24_02_2022\n\
+2023-02-06 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2023-02-06 00:00:00 UTC,#bcaaa4,20.0,0.0,unspecified\n\
+2023-02-07 00:00:00 UTC,#a52714,130.0,0.0,occupied_after_24_02_2022\n\
+2023-02-07 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2023-02-07 00:00:00 UTC,#bcaaa4,21.0,0.0,unspecified\n";
+
+    fn build_chart_from_csv(csv: &str) -> super::ChartOutput {
+        let path = write_temp_csv(csv);
+        let buckets = load_area_buckets(&path).expect("failed to load area buckets");
+        remove_temp_csv(&path);
+        build_area_chart_from_buckets(&buckets, None).expect("failed to build chart")
+    }
+
+    fn build_chart_from_csv_with_config(
+        csv: &str,
+        render_config: ChartRenderConfig,
+    ) -> super::ChartOutput {
+        let path = write_temp_csv(csv);
+        let buckets = load_area_buckets(&path).expect("failed to load area buckets");
+        remove_temp_csv(&path);
+        build_area_chart_from_buckets_with_config(&buckets, None, render_config)
+            .expect("failed to build chart")
+    }
+
+    fn collect_main_traces(chart: &super::ChartOutput) -> Vec<Value> {
+        chart
+            .main_plot
+            .data()
+            .iter()
+            .map(|trace| serde_json::from_str::<Value>(&trace.to_json()).expect("invalid trace"))
+            .collect::<Vec<_>>()
+    }
+
+    fn parse_trace_dates(trace: &Value) -> Vec<NaiveDate> {
+        trace
+            .get("x")
+            .and_then(Value::as_array)
+            .expect("x values are missing")
+            .iter()
+            .map(|value| value.as_str().expect("x must be string"))
+            .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").expect("valid x date"))
+            .collect::<Vec<_>>()
+    }
 
     #[test]
     fn yoy_grouping_normalizes_dates_to_anchor_year() {
@@ -1301,5 +1724,242 @@ mod tests {
 
         let actual = (1..=12).map(normalize_to_yoy_month).collect::<Vec<_>>();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn main_plot_adds_unspecified_band_before_actual_line() {
+        let chart = build_chart_from_csv(SAMPLE_GRAY_ZONE_CSV);
+        let traces = collect_main_traces(&chart);
+
+        let band_idx = traces
+            .iter()
+            .position(|trace| {
+                trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_BAND_MAIN)
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y1")
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x1")
+                    && trace.get("fill").and_then(Value::as_str) == Some("tonexty")
+                    && trace
+                        .get("fillcolor")
+                        .and_then(Value::as_str)
+                        .is_some_and(|color| {
+                            color.contains("128,128,128") || color.contains("128, 128, 128")
+                        })
+            })
+            .expect("unspecified fill trace not found");
+        let actual_idx = traces
+            .iter()
+            .position(|trace| trace.get("name").and_then(Value::as_str) == Some(LABEL_ACTUAL))
+            .expect("actual trace not found");
+
+        assert!(
+            actual_idx > band_idx,
+            "actual line must be drawn after unspecified band; actual_idx={actual_idx}, band_idx={band_idx}"
+        );
+    }
+
+    #[test]
+    fn main_plot_adds_unspecified_change_trace_on_lower_panel() {
+        let chart = build_chart_from_csv(SAMPLE_GRAY_ZONE_CSV);
+        let traces = collect_main_traces(&chart);
+
+        let lower_panel_trace = traces
+            .iter()
+            .find(|trace| {
+                trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_CHANGE)
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x2")
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y2")
+            })
+            .expect("unspecified change trace on lower panel not found");
+        assert_eq!(
+            lower_panel_trace.get("fill").and_then(Value::as_str),
+            Some("tonexty")
+        );
+        assert_eq!(
+            lower_panel_trace.get("visible").and_then(Value::as_str),
+            Some("legendonly")
+        );
+        let values = lower_panel_trace
+            .get("y")
+            .and_then(Value::as_array)
+            .expect("y values are missing");
+        assert!(
+            !values.is_empty(),
+            "unspecified change trace must not be empty"
+        );
+    }
+
+    #[test]
+    fn gray_zone_is_rendered_from_threshold_date_inclusive() {
+        let chart = build_chart_from_csv(SAMPLE_GRAY_ZONE_THRESHOLD_CSV);
+        let traces = collect_main_traces(&chart);
+
+        let threshold = NaiveDate::from_ymd_opt(2023, 2, 5).expect("valid date");
+
+        let upper_gray_trace = traces
+            .iter()
+            .find(|trace| {
+                trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_BAND_MAIN)
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y1")
+                    && trace.get("fill").and_then(Value::as_str) == Some("tonexty")
+            })
+            .expect("upper gray-zone trace not found");
+        let upper_x = parse_trace_dates(upper_gray_trace);
+        assert!(
+            !upper_x.is_empty(),
+            "upper gray-zone trace must not be empty"
+        );
+        assert!(upper_x.iter().all(|date| *date >= threshold));
+        assert!(upper_x.contains(&threshold));
+
+        let lower_gray_trace = traces
+            .iter()
+            .find(|trace| {
+                trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_CHANGE)
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x2")
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y2")
+            })
+            .expect("lower gray-zone trace not found");
+        let lower_x = parse_trace_dates(lower_gray_trace);
+        assert!(
+            !lower_x.is_empty(),
+            "lower gray-zone trace must not be empty"
+        );
+        assert!(lower_x.iter().all(|date| *date >= threshold));
+        assert!(lower_x.contains(&threshold));
+    }
+
+    #[test]
+    fn gray_zone_start_date_respects_render_config() {
+        let render_config = ChartRenderConfig {
+            gray_zone_start: NaiveDate::from_ymd_opt(2023, 2, 4).expect("valid date"),
+            ..ChartRenderConfig::default()
+        };
+        let chart = build_chart_from_csv_with_config(SAMPLE_GRAY_ZONE_THRESHOLD_CSV, render_config);
+        let traces = collect_main_traces(&chart);
+        let threshold = NaiveDate::from_ymd_opt(2023, 2, 4).expect("valid date");
+
+        let upper_gray_trace = traces
+            .iter()
+            .find(|trace| {
+                trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_BAND_MAIN)
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y1")
+                    && trace.get("fill").and_then(Value::as_str) == Some("tonexty")
+            })
+            .expect("upper gray-zone trace not found");
+        let upper_x = parse_trace_dates(upper_gray_trace);
+        assert!(
+            !upper_x.is_empty(),
+            "upper gray-zone trace must not be empty"
+        );
+        assert!(upper_x.iter().all(|date| *date >= threshold));
+        assert!(upper_x.contains(&threshold));
+
+        let lower_gray_trace = traces
+            .iter()
+            .find(|trace| {
+                trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_CHANGE)
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x2")
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y2")
+            })
+            .expect("lower gray-zone trace not found");
+        let lower_x = parse_trace_dates(lower_gray_trace);
+        assert!(
+            !lower_x.is_empty(),
+            "lower gray-zone trace must not be empty"
+        );
+        assert!(lower_x.iter().all(|date| *date >= threshold));
+        assert!(lower_x.contains(&threshold));
+    }
+
+    #[test]
+    fn plot_legends_allow_toggle_visibility() {
+        let chart = build_chart_from_csv(SAMPLE_GRAY_ZONE_CSV);
+        let main_plot_json =
+            serde_json::from_str::<Value>(&chart.main_plot.to_json()).expect("invalid plot json");
+        let main_legend = main_plot_json
+            .get("layout")
+            .and_then(|layout| layout.get("legend"))
+            .expect("main legend is missing");
+        assert_eq!(
+            main_legend.get("itemclick").and_then(Value::as_str),
+            Some("toggle")
+        );
+        assert_eq!(
+            main_legend.get("itemdoubleclick").and_then(Value::as_str),
+            Some("toggleothers")
+        );
+
+        let yoy_plot_json =
+            serde_json::from_str::<Value>(&chart.yoy_plot.to_json()).expect("invalid plot json");
+        let yoy_legend = yoy_plot_json
+            .get("layout")
+            .and_then(|layout| layout.get("legend"))
+            .expect("yoy legend is missing");
+        assert_eq!(
+            yoy_legend.get("itemclick").and_then(Value::as_str),
+            Some("toggle")
+        );
+        assert_eq!(
+            yoy_legend.get("itemdoubleclick").and_then(Value::as_str),
+            Some("toggleothers")
+        );
+    }
+
+    #[test]
+    fn shared_downsample_keeps_upper_extrema() {
+        let x: Vec<u32> = (0..12).collect();
+        let lower = vec![0.0; x.len()];
+        let mut upper = vec![0.0; x.len()];
+        upper[6] = 10.0;
+
+        let (x_out, lower_out, upper_out) = downsample_min_max_shared_x(&x, &lower, &upper, 4);
+        assert_eq!(x_out.len(), lower_out.len());
+        assert_eq!(x_out.len(), upper_out.len());
+        assert!(
+            x_out.contains(&6),
+            "downsampled x must contain upper extremum index"
+        );
+        assert!(upper_out.iter().any(|value| (*value - 10.0).abs() < 1e-12));
+    }
+
+    #[test]
+    fn unspecified_change_plot_is_relative_to_reference_change() {
+        let dates = vec![
+            NaiveDate::from_ymd_opt(2023, 2, 4).expect("valid date"),
+            NaiveDate::from_ymd_opt(2023, 2, 5).expect("valid date"),
+            NaiveDate::from_ymd_opt(2023, 2, 6).expect("valid date"),
+            NaiveDate::from_ymd_opt(2023, 2, 7).expect("valid date"),
+        ];
+        let areas = vec![3_500.0, 10.0, 12.0, 13.0];
+        let reference_change = PreparedChangeSeries {
+            baseline: NaiveDate::from_ymd_opt(2022, 11, 23).expect("valid date"),
+            dates: vec![
+                NaiveDate::from_ymd_opt(2023, 2, 5).expect("valid date"),
+                NaiveDate::from_ymd_opt(2023, 2, 6).expect("valid date"),
+                NaiveDate::from_ymd_opt(2023, 2, 7).expect("valid date"),
+            ],
+            labels: vec![
+                "2023-02-05".to_string(),
+                "2023-02-06".to_string(),
+                "2023-02-07".to_string(),
+            ],
+            values: vec![100.0, 101.0, 102.0],
+        };
+
+        let plot = prepare_unspecified_change_plot(
+            &reference_change,
+            &dates,
+            &areas,
+            NaiveDate::from_ymd_opt(2023, 2, 5).expect("valid date"),
+            100,
+        );
+
+        assert!(!plot.dates.is_empty());
+        assert_eq!(plot.dates[0], "2023-02-05");
+        assert_eq!(plot.reference_values, vec![100.0, 101.0, 102.0]);
+        assert_eq!(plot.values.len(), 3);
+        assert!((plot.values[0] - 101.0).abs() < 1e-12);
+        assert!((plot.values[1] - 102.0).abs() < 1e-12);
+        assert!((plot.values[2] - 103.0).abs() < 1e-12);
     }
 }

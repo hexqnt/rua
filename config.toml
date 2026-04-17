@@ -22,3 +22,7 @@ csv = "dist/history.csv"
 forecast_csv = "dist/forecast.csv"
 output_html = "dist/index.html"
 minify_html = true
+
+[chart]
+gray_zone_start = "2023-02-05"
+avg_change_start = "2022-11-23"

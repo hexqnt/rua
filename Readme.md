@@ -22,6 +22,9 @@ cargo run -- --config config.toml
 - `[download]`: только скачивание CSV.
 - `[forecast]`: обучение модели и сохранение прогноза в CSV.
 - `[render]`: сборка HTML по историческому CSV и CSV прогноза.
+- `[chart]`: даты начала отрисовки для визуальных серий.
+  - `gray_zone_start`: старт «Серой зоны» на верхнем и нижнем графиках.
+  - `avg_change_start`: старт линии «Ср. изменение» (красная линия и YoY-блок).
 - `model` и `[trend_filter]`: параметры модели (встроены в общий конфиг).
 
 Относительные пути из конфига резолвятся от текущей директории запуска.
@@ -54,6 +57,10 @@ output_history_csv = "dist/history.csv"
 output_forecast_csv = "dist/forecast.csv"
 horizon_days = 365
 minify_html = true
+
+[chart]
+gray_zone_start = "2023-02-05"
+avg_change_start = "2022-11-23"
 ```
 
 ### Только скачивание CSV
@@ -88,6 +95,10 @@ csv = "dist/history.csv"
 forecast_csv = "dist/forecast.csv"
 output_html = "dist/custom.html"
 minify_html = false
+
+[chart]
+gray_zone_start = "2023-02-05"
+avg_change_start = "2022-11-23"
 ```
 
 ## Прогноз

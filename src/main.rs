@@ -5,6 +5,7 @@ mod model;
 mod report;
 mod series;
 
+use chrono::NaiveDate;
 use clap::Parser;
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -59,6 +60,14 @@ fn default_forecast_csv() -> PathBuf {
     PathBuf::from(DEFAULT_FORECAST_CSV)
 }
 
+fn default_gray_zone_start() -> NaiveDate {
+    report::ChartRenderConfig::default().gray_zone_start
+}
+
+fn default_avg_change_start() -> NaiveDate {
+    report::ChartRenderConfig::default().avg_change_start
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Mode {
@@ -93,6 +102,8 @@ struct AppConfigFile {
     forecast: ForecastConfigFile,
     #[serde(default)]
     render: RenderConfigFile,
+    #[serde(default)]
+    chart: ChartConfigFile,
     #[serde(default)]
     model: ModelKind,
     #[serde(default)]
@@ -182,6 +193,24 @@ impl Default for RenderConfigFile {
             forecast_csv: None,
             output_html: default_output_html(),
             minify_html: default_minify_html(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChartConfigFile {
+    #[serde(default = "default_gray_zone_start")]
+    gray_zone_start: NaiveDate,
+    #[serde(default = "default_avg_change_start")]
+    avg_change_start: NaiveDate,
+}
+
+impl Default for ChartConfigFile {
+    fn default() -> Self {
+        Self {
+            gray_zone_start: default_gray_zone_start(),
+            avg_change_start: default_avg_change_start(),
         }
     }
 }
@@ -335,6 +364,7 @@ struct AppConfig {
     archive_csv: bool,
     mode_config: ModeConfig,
     model: ResolvedModelConfig,
+    chart: report::ChartRenderConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -428,6 +458,10 @@ fn resolve_runtime_path(path: &Path) -> Result<PathBuf, String> {
 
 fn resolve_app_config(config: AppConfigFile, cwd: &Path) -> Result<AppConfig, String> {
     let model = resolve_model_config(config.model, config.trend_filter);
+    let chart = report::ChartRenderConfig {
+        gray_zone_start: config.chart.gray_zone_start,
+        avg_change_start: config.chart.avg_change_start,
+    };
 
     let run = RunConfig {
         output_html: resolve_runtime_path_from(&config.run.output_html, cwd),
@@ -477,6 +511,7 @@ fn resolve_app_config(config: AppConfigFile, cwd: &Path) -> Result<AppConfig, St
         archive_csv: config.archive_csv,
         mode_config,
         model,
+        chart,
     })
 }
 
@@ -658,6 +693,7 @@ async fn main() {
         archive_csv,
         mode_config,
         model: model_config,
+        chart: chart_config,
     } = app_config;
 
     tracing::info!(
@@ -665,6 +701,8 @@ async fn main() {
         archive_csv,
         config_path = %config_path.display(),
         model = %model_config.kind,
+        gray_zone_start = %chart_config.gray_zone_start,
+        avg_change_start = %chart_config.avg_change_start,
         "Loaded configuration"
     );
 
@@ -750,10 +788,11 @@ async fn main() {
             }
 
             let overlay = build_forecast_overlay(&forecast);
-            if let Err(err) = report::draw_area_chart_with_forecast_from_buckets(
+            if let Err(err) = report::draw_area_chart_with_forecast_from_buckets_and_config(
                 &buckets,
                 &config.output_html,
                 Some(&overlay),
+                chart_config,
                 Some(download_links),
                 config.minify_html,
             ) {
@@ -897,10 +936,11 @@ async fn main() {
                 }
             };
 
-            if let Err(err) = report::draw_area_chart_with_forecast(
+            if let Err(err) = report::draw_area_chart_with_forecast_and_config(
                 &config.csv,
                 &config.output_html,
                 Some(&overlay),
+                chart_config,
                 Some(download_links),
                 config.minify_html,
             ) {
@@ -928,6 +968,7 @@ mod tests {
         AppConfigFile, DownloadConfig, Mode, ModeConfig, ModelKind, RenderConfig,
         resolve_app_config,
     };
+    use chrono::NaiveDate;
     use std::path::Path;
 
     #[test]
@@ -969,6 +1010,11 @@ mod tests {
 
         assert_eq!(resolved.mode, Mode::Run);
         assert!(!resolved.archive_csv);
+        assert_eq!(
+            resolved.chart,
+            crate::report::ChartRenderConfig::default(),
+            "default chart render config must be applied"
+        );
         match resolved.mode_config {
             ModeConfig::Run(run) => {
                 assert_eq!(
@@ -1047,6 +1093,25 @@ mod tests {
                 output_html: Path::new("repo").join("dist/custom.html"),
                 minify_html: true,
             })
+        );
+    }
+
+    #[test]
+    fn resolves_chart_dates_from_config() {
+        let config: AppConfigFile = toml::from_str(
+            "mode = \"run\"\n[chart]\ngray_zone_start = \"2023-02-05\"\navg_change_start = \"2022-12-01\"",
+        )
+        .expect("chart config should parse");
+        let resolved =
+            resolve_app_config(config, Path::new("repo")).expect("config should resolve");
+
+        assert_eq!(
+            resolved.chart.gray_zone_start,
+            NaiveDate::from_ymd_opt(2023, 2, 5).expect("valid date")
+        );
+        assert_eq!(
+            resolved.chart.avg_change_start,
+            NaiveDate::from_ymd_opt(2022, 12, 1).expect("valid date")
         );
     }
 }

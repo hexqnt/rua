@@ -9,6 +9,7 @@ use serde::{Deserialize, Deserializer};
 
 const AREA_TYPE_OCCUPIED: &str = "occupied_after_24_02_2022";
 const AREA_TYPE_OTHER: &str = "other_territories";
+const AREA_TYPE_UNSPECIFIED: &str = "unspecified";
 const UA_HASH: &str = "#01579b";
 
 const TIME_FORMAT_TZ: &str = "%Y-%m-%d %H:%M:%S %Z";
@@ -61,6 +62,7 @@ impl TimeFormatHint {
 enum AreaKind {
     RuOccupied,
     UaOtherTerritories,
+    Unspecified,
     Other,
 }
 
@@ -72,6 +74,7 @@ where
     Ok(match raw.as_str() {
         AREA_TYPE_OCCUPIED => AreaKind::RuOccupied,
         AREA_TYPE_OTHER => AreaKind::UaOtherTerritories,
+        AREA_TYPE_UNSPECIFIED => AreaKind::Unspecified,
         _ => AreaKind::Other,
     })
 }
@@ -133,6 +136,7 @@ impl DailyAccumulator {
 pub struct AreaBuckets {
     ru: DailyBuckets,
     ua: DailyBuckets,
+    unspecified: DailyBuckets,
 }
 
 impl AreaBuckets {
@@ -145,9 +149,20 @@ impl AreaBuckets {
             (AreaKind::UaOtherTerritories, HashKind::Ua) => {
                 self.ua.entry(date).or_default().add(row.area);
             }
+            (AreaKind::Unspecified, _) => {
+                self.unspecified.entry(date).or_default().add(row.area);
+            }
             _ => {} // Игнорируем прочие категории.
         }
     }
+}
+
+/// Непрерывные дневные ряды для занятых территорий и слоя `unspecified`.
+#[derive(Clone, Debug)]
+pub struct OccupiedUnspecifiedSeries {
+    pub dates: Vec<NaiveDate>,
+    pub occupied: Vec<f64>,
+    pub unspecified: Vec<f64>,
 }
 
 /// Читает CSV и раскладывает значения по дневным бакетам.
@@ -169,10 +184,19 @@ pub fn load_area_buckets(csv_path: &Path) -> Result<AreaBuckets, Box<dyn Error>>
 pub fn build_occupied_series(
     buckets: &AreaBuckets,
 ) -> Result<(Vec<NaiveDate>, Vec<f64>), Box<dyn Error>> {
+    let series = build_occupied_and_unspecified_series(buckets)?;
+    Ok((series.dates, series.occupied))
+}
+
+/// Строит непрерывные ряды `occupied` и `unspecified` на общей шкале дат.
+pub fn build_occupied_and_unspecified_series(
+    buckets: &AreaBuckets,
+) -> Result<OccupiedUnspecifiedSeries, Box<dyn Error>> {
     let first_date = buckets
         .ru
         .keys()
         .chain(buckets.ua.keys())
+        .chain(buckets.unspecified.keys())
         .min()
         .copied()
         .ok_or_else(|| ERROR_NO_DATA.to_string())?;
@@ -180,6 +204,7 @@ pub fn build_occupied_series(
         .ru
         .keys()
         .chain(buckets.ua.keys())
+        .chain(buckets.unspecified.keys())
         .max()
         .copied()
         .ok_or_else(|| ERROR_NO_DATA.to_string())?;
@@ -200,13 +225,18 @@ pub fn build_occupied_series(
 
     let ru_values = interpolate_series(&dates, &buckets.ru);
     let ua_values = interpolate_series(&dates, &buckets.ua);
+    let unspecified_values = interpolate_series(&dates, &buckets.unspecified);
     let occupied_area = ru_values
         .iter()
         .zip(ua_values)
         .map(|(ru, ua)| ru - ua)
         .collect();
 
-    Ok((dates, occupied_area))
+    Ok(OccupiedUnspecifiedSeries {
+        dates,
+        occupied: occupied_area,
+        unspecified: unspecified_values,
+    })
 }
 
 /// Парсит разные форматы времени из API и приводит их к UTC.
@@ -321,4 +351,129 @@ fn interpolate_series(dates: &[NaiveDate], source: &DailyBuckets) -> Vec<f64> {
         .into_iter()
         .map(|value| value.unwrap_or(fallback))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_occupied_and_unspecified_series, build_occupied_series, load_area_buckets};
+    use chrono::NaiveDate;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    const EPS: f64 = 1e-9;
+
+    fn write_temp_csv(contents: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before UNIX_EPOCH")
+            .as_nanos();
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut path = std::env::temp_dir();
+        path.push(format!("rua_series_test_{timestamp}_{counter}.csv"));
+        std::fs::write(&path, contents).expect("failed to write test csv");
+        path
+    }
+
+    fn remove_temp_csv(path: &Path) {
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn assert_vec_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "series length mismatch: actual={} expected={}",
+            actual.len(),
+            expected.len()
+        );
+        for (idx, (actual_value, expected_value)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                (actual_value - expected_value).abs() < EPS,
+                "mismatch at index {idx}: actual={actual_value}, expected={expected_value}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_area_buckets_parses_unspecified_independent_of_hash() {
+        let csv = "time_index,hash,area,percent,area_type\n\
+2024-02-01 00:00:00 UTC,#01579b,12.5,0.0,unspecified\n\
+2024-02-01 00:00:00 UTC,#a52714,100.0,0.0,occupied_after_24_02_2022\n\
+2024-02-01 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n";
+        let path = write_temp_csv(csv);
+        let buckets = load_area_buckets(&path).expect("failed to load area buckets");
+        remove_temp_csv(&path);
+
+        let date = NaiveDate::from_ymd_opt(2024, 2, 1).expect("valid date");
+        let unspecified = buckets
+            .unspecified
+            .get(&date)
+            .and_then(super::DailyAccumulator::mean)
+            .expect("missing unspecified bucket");
+        assert!(
+            (unspecified - 12.5).abs() < EPS,
+            "unexpected unspecified value: {unspecified}"
+        );
+    }
+
+    #[test]
+    fn build_occupied_series_ignores_unspecified_values() {
+        let csv = "time_index,hash,area,percent,area_type\n\
+2024-03-01 00:00:00 UTC,#a52714,100.0,0.0,occupied_after_24_02_2022\n\
+2024-03-01 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-03-01 00:00:00 UTC,#bcaaa4,30.0,0.0,unspecified\n\
+2024-03-02 00:00:00 UTC,#a52714,110.0,0.0,occupied_after_24_02_2022\n\
+2024-03-02 00:00:00 UTC,#01579b,25.0,0.0,other_territories\n\
+2024-03-02 00:00:00 UTC,#bcaaa4,40.0,0.0,unspecified\n";
+        let path = write_temp_csv(csv);
+        let buckets = load_area_buckets(&path).expect("failed to load area buckets");
+        remove_temp_csv(&path);
+
+        let (dates, occupied) = build_occupied_series(&buckets).expect("failed to build series");
+        assert_eq!(
+            dates,
+            vec![
+                NaiveDate::from_ymd_opt(2024, 3, 1).expect("valid date"),
+                NaiveDate::from_ymd_opt(2024, 3, 2).expect("valid date"),
+            ]
+        );
+        assert_vec_close(&occupied, &[80.0, 85.0]);
+    }
+
+    #[test]
+    fn build_occupied_and_unspecified_series_uses_common_interpolated_dates() {
+        let csv = "time_index,hash,area,percent,area_type\n\
+2024-04-01 00:00:00 UTC,#a52714,100.0,0.0,occupied_after_24_02_2022\n\
+2024-04-01 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-04-01 00:00:00 UTC,#bcaaa4,10.0,0.0,unspecified\n\
+2024-04-03 00:00:00 UTC,#a52714,160.0,0.0,occupied_after_24_02_2022\n\
+2024-04-03 00:00:00 UTC,#01579b,50.0,0.0,other_territories\n\
+2024-04-03 00:00:00 UTC,#bcaaa4,40.0,0.0,unspecified\n";
+        let path = write_temp_csv(csv);
+        let buckets = load_area_buckets(&path).expect("failed to load area buckets");
+        remove_temp_csv(&path);
+
+        let series = build_occupied_and_unspecified_series(&buckets)
+            .expect("failed to build occupied/unspecified series");
+        assert_eq!(
+            series.dates,
+            vec![
+                NaiveDate::from_ymd_opt(2024, 4, 1).expect("valid date"),
+                NaiveDate::from_ymd_opt(2024, 4, 2).expect("valid date"),
+                NaiveDate::from_ymd_opt(2024, 4, 3).expect("valid date"),
+            ]
+        );
+        assert_vec_close(&series.occupied, &[80.0, 95.0, 110.0]);
+        assert_vec_close(&series.unspecified, &[10.0, 25.0, 40.0]);
+
+        let upper = series
+            .occupied
+            .iter()
+            .zip(&series.unspecified)
+            .map(|(occupied, unspecified)| occupied + unspecified)
+            .collect::<Vec<_>>();
+        assert_vec_close(&upper, &[90.0, 120.0, 150.0]);
+    }
 }

@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::series::AreaBuckets;
 use chrono::Utc;
 
-pub use chart::ForecastOverlay;
+pub use chart::{ChartRenderConfig, ForecastOverlay};
 
 const DEFAULT_HISTORY_CSV_LINK: &str = "history.csv";
 const DEFAULT_FORECAST_CSV_LINK: &str = "forecast.csv";
@@ -44,11 +44,30 @@ pub fn draw_area_chart_with_forecast(
     download_links: Option<DownloadLinks>,
     minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
+    let render_config = ChartRenderConfig::default();
+    draw_area_chart_with_forecast_and_config(
+        csv_path,
+        output_html,
+        forecast,
+        render_config,
+        download_links,
+        minify_html,
+    )
+}
+
+pub fn draw_area_chart_with_forecast_and_config(
+    csv_path: &Path,
+    output_html: &Path,
+    forecast: Option<&ForecastOverlay>,
+    render_config: ChartRenderConfig,
+    download_links: Option<DownloadLinks>,
+    minify_html: bool,
+) -> Result<(), Box<dyn Error>> {
     let chart::ChartOutput {
         main_plot,
         yoy_plot,
         summary,
-    } = chart::build_area_chart(csv_path, forecast)?;
+    } = chart::build_area_chart_with_config(csv_path, forecast, render_config)?;
     render_plot(
         &main_plot,
         &yoy_plot,
@@ -59,6 +78,7 @@ pub fn draw_area_chart_with_forecast(
     )
 }
 
+#[allow(dead_code)]
 pub fn draw_area_chart_with_forecast_from_buckets(
     buckets: &AreaBuckets,
     output_html: &Path,
@@ -66,11 +86,30 @@ pub fn draw_area_chart_with_forecast_from_buckets(
     download_links: Option<DownloadLinks>,
     minify_html: bool,
 ) -> Result<(), Box<dyn Error>> {
+    let render_config = ChartRenderConfig::default();
+    draw_area_chart_with_forecast_from_buckets_and_config(
+        buckets,
+        output_html,
+        forecast,
+        render_config,
+        download_links,
+        minify_html,
+    )
+}
+
+pub fn draw_area_chart_with_forecast_from_buckets_and_config(
+    buckets: &AreaBuckets,
+    output_html: &Path,
+    forecast: Option<&ForecastOverlay>,
+    render_config: ChartRenderConfig,
+    download_links: Option<DownloadLinks>,
+    minify_html: bool,
+) -> Result<(), Box<dyn Error>> {
     let chart::ChartOutput {
         main_plot,
         yoy_plot,
         summary,
-    } = chart::build_area_chart_from_buckets(buckets, forecast)?;
+    } = chart::build_area_chart_from_buckets_with_config(buckets, forecast, render_config)?;
     render_plot(
         &main_plot,
         &yoy_plot,
