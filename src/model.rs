@@ -97,6 +97,21 @@ pub struct Forecast {
     pub variance: Vec<f64>,
 }
 
+impl Forecast {
+    const fn len(&self) -> Result<usize, &'static str> {
+        let len = self.dates.len();
+        if self.mean.len() == len
+            && self.lower.len() == len
+            && self.upper.len() == len
+            && self.variance.len() == len
+        {
+            Ok(len)
+        } else {
+            Err("forecast vectors must have the same length")
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct TrendFilterConfig {
     pub lambda: f64,
@@ -142,6 +157,8 @@ struct ForecastRow {
 }
 
 pub fn write_forecast_csv(forecast: &Forecast, output_path: &Path) -> Result<(), Box<dyn Error>> {
+    forecast.len()?;
+
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -151,8 +168,8 @@ pub fn write_forecast_csv(forecast: &Forecast, output_path: &Path) -> Result<(),
     let mut writer = csv::Writer::from_path(output_path)?;
     writer.write_record(["date", "mean", "lower", "upper", "variance"])?;
 
-    for idx in 0..forecast.dates.len() {
-        let date = forecast.dates[idx].format(DATE_FORMAT).to_string();
+    for (idx, date) in forecast.dates.iter().enumerate() {
+        let date = date.format(DATE_FORMAT).to_string();
         writer.write_record([
             date,
             format!("{:.6}", forecast.mean[idx]),

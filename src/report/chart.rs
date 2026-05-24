@@ -140,6 +140,8 @@ const AXIS_MAIN_X: &str = "x1";
 const AXIS_MAIN_Y: &str = "y1";
 const AXIS_CHANGE_X: &str = "x2";
 const AXIS_CHANGE_Y: &str = "y2";
+const AXIS_UNSPECIFIED_CHANGE_X: &str = "x3";
+const AXIS_UNSPECIFIED_CHANGE_Y: &str = "y3";
 const AXIS_YOY_X: &str = "x";
 const AXIS_YOY_Y: &str = "y";
 const AXIS_YOY_BOX_X: &str = "x2";
@@ -195,7 +197,7 @@ const MARGIN_BOTTOM: usize = 60;
 const MARGIN_PAD: usize = 8;
 const TICK_LENGTH: usize = 6;
 const AXIS_GRID_WIDTH: usize = 1;
-const GRID_ROWS: usize = 2;
+const GRID_ROWS: usize = 3;
 const GRID_COLS: usize = 1;
 const GRID_Y_GAP: f64 = 0.08;
 const X_MAIN_TICKS_COUNT: usize = 14;
@@ -469,8 +471,8 @@ pub(super) fn build_area_chart_from_buckets_with_config(
             .mode(Mode::Lines)
             .line(Line::new().color(rgba(COLOR_UNSPECIFIED_TRANSPARENT)))
             .show_legend(false)
-            .x_axis(AXIS_CHANGE_X)
-            .y_axis(AXIS_CHANGE_Y),
+            .x_axis(AXIS_UNSPECIFIED_CHANGE_X)
+            .y_axis(AXIS_UNSPECIFIED_CHANGE_Y),
         );
         plot.add_trace(
             Scatter::new(
@@ -488,8 +490,8 @@ pub(super) fn build_area_chart_from_buckets_with_config(
             )
             .visible(Visible::LegendOnly)
             .name(LABEL_UNSPECIFIED_CHANGE)
-            .x_axis(AXIS_CHANGE_X)
-            .y_axis(AXIS_CHANGE_Y),
+            .x_axis(AXIS_UNSPECIFIED_CHANGE_X)
+            .y_axis(AXIS_UNSPECIFIED_CHANGE_Y),
         );
     }
 
@@ -658,71 +660,12 @@ pub(super) fn build_area_chart_from_buckets_with_config(
         )
         .annotations(annotations)
         .shapes(marker_shapes)
-        .x_axis(
-            Axis::new()
-                .title(Title::new())
-                .show_tick_labels(false)
-                .n_ticks(X_MAIN_TICKS_COUNT)
-                .ticks(TicksDirection::Outside)
-                .tick_length(TICK_LENGTH)
-                .tick_color(rgba(COLOR_AXIS_TICK))
-                .show_line(true)
-                .line_color(rgba(COLOR_AXIS_LINE))
-                .grid_color(rgba(COLOR_AXIS_GRID_LIGHT))
-                .grid_width(AXIS_GRID_WIDTH)
-                .auto_margin(true),
-        )
-        .y_axis(
-            Axis::new()
-                .title(
-                    Title::with_text(UNIT_THOUSAND_KM2)
-                        .font(Font::new().size(FONT_SIZE_AXIS_TITLE)),
-                )
-                .n_ticks(Y_MAIN_TICKS_COUNT)
-                .tick_font(Font::new().size(FONT_SIZE_AXIS_TICK))
-                .ticks(TicksDirection::Outside)
-                .tick_length(TICK_LENGTH)
-                .tick_color(rgba(COLOR_AXIS_TICK))
-                .separate_thousands(true)
-                .show_line(true)
-                .line_color(rgba(COLOR_AXIS_LINE))
-                .grid_color(rgba(COLOR_AXIS_GRID_MEDIUM))
-                .grid_width(AXIS_GRID_WIDTH)
-                .auto_margin(true),
-        )
-        .x_axis2(
-            Axis::new()
-                .matches("x")
-                .tick_format(TICK_FORMAT_MONTH_YEAR)
-                .n_ticks(X2_TICKS_COUNT)
-                .tick_font(Font::new().size(FONT_SIZE_AXIS_TICK))
-                .ticks(TicksDirection::Outside)
-                .tick_length(TICK_LENGTH)
-                .tick_color(rgba(COLOR_AXIS_TICK))
-                .show_line(true)
-                .line_color(rgba(COLOR_AXIS_LINE))
-                .grid_color(rgba(COLOR_AXIS_GRID_LIGHT))
-                .grid_width(AXIS_GRID_WIDTH)
-                .auto_margin(true),
-        )
-        .y_axis2(
-            Axis::new()
-                .title(
-                    Title::with_text(UNIT_KM2_PER_DAY).font(Font::new().size(FONT_SIZE_AXIS_TITLE)),
-                )
-                .hover_format(HOVER_FORMAT_KM2_PER_DAY)
-                .n_ticks(Y_CHANGE_TICKS_COUNT)
-                .tick_font(Font::new().size(FONT_SIZE_AXIS_TICK))
-                .ticks(TicksDirection::Outside)
-                .tick_length(TICK_LENGTH)
-                .tick_color(rgba(COLOR_AXIS_TICK))
-                .separate_thousands(true)
-                .show_line(true)
-                .line_color(rgba(COLOR_AXIS_LINE))
-                .grid_color(rgba(COLOR_AXIS_GRID_MEDIUM))
-                .grid_width(AXIS_GRID_WIDTH)
-                .auto_margin(true),
-        );
+        .x_axis(build_main_area_x_axis())
+        .y_axis(build_main_area_y_axis())
+        .x_axis2(build_main_change_x_axis(false))
+        .y_axis2(build_main_change_y_axis())
+        .x_axis3(build_main_change_x_axis(true))
+        .y_axis3(build_main_change_y_axis());
 
     plot.set_layout(layout);
     plot.set_configuration(Configuration::new().responsive(true));
@@ -757,6 +700,75 @@ pub(super) fn build_area_chart_from_buckets_with_config(
             forecast: forecast_summary,
         },
     })
+}
+
+fn build_main_area_x_axis() -> Axis {
+    Axis::new()
+        .title(Title::new())
+        .show_tick_labels(false)
+        .n_ticks(X_MAIN_TICKS_COUNT)
+        .ticks(TicksDirection::Outside)
+        .tick_length(TICK_LENGTH)
+        .tick_color(rgba(COLOR_AXIS_TICK))
+        .show_line(true)
+        .line_color(rgba(COLOR_AXIS_LINE))
+        .grid_color(rgba(COLOR_AXIS_GRID_LIGHT))
+        .grid_width(AXIS_GRID_WIDTH)
+        .auto_margin(true)
+}
+
+fn build_main_area_y_axis() -> Axis {
+    Axis::new()
+        .title(Title::with_text(UNIT_THOUSAND_KM2).font(Font::new().size(FONT_SIZE_AXIS_TITLE)))
+        .n_ticks(Y_MAIN_TICKS_COUNT)
+        .tick_font(Font::new().size(FONT_SIZE_AXIS_TICK))
+        .ticks(TicksDirection::Outside)
+        .tick_length(TICK_LENGTH)
+        .tick_color(rgba(COLOR_AXIS_TICK))
+        .separate_thousands(true)
+        .show_line(true)
+        .line_color(rgba(COLOR_AXIS_LINE))
+        .grid_color(rgba(COLOR_AXIS_GRID_MEDIUM))
+        .grid_width(AXIS_GRID_WIDTH)
+        .auto_margin(true)
+}
+
+fn build_main_change_x_axis(show_tick_labels: bool) -> Axis {
+    let axis = Axis::new()
+        .matches("x")
+        .n_ticks(X2_TICKS_COUNT)
+        .tick_font(Font::new().size(FONT_SIZE_AXIS_TICK))
+        .ticks(TicksDirection::Outside)
+        .tick_length(TICK_LENGTH)
+        .tick_color(rgba(COLOR_AXIS_TICK))
+        .show_line(true)
+        .line_color(rgba(COLOR_AXIS_LINE))
+        .grid_color(rgba(COLOR_AXIS_GRID_LIGHT))
+        .grid_width(AXIS_GRID_WIDTH)
+        .auto_margin(true);
+
+    if show_tick_labels {
+        axis.tick_format(TICK_FORMAT_MONTH_YEAR)
+    } else {
+        axis.show_tick_labels(false)
+    }
+}
+
+fn build_main_change_y_axis() -> Axis {
+    Axis::new()
+        .title(Title::with_text(UNIT_KM2_PER_DAY).font(Font::new().size(FONT_SIZE_AXIS_TITLE)))
+        .hover_format(HOVER_FORMAT_KM2_PER_DAY)
+        .n_ticks(Y_CHANGE_TICKS_COUNT)
+        .tick_font(Font::new().size(FONT_SIZE_AXIS_TICK))
+        .ticks(TicksDirection::Outside)
+        .tick_length(TICK_LENGTH)
+        .tick_color(rgba(COLOR_AXIS_TICK))
+        .separate_thousands(true)
+        .show_line(true)
+        .line_color(rgba(COLOR_AXIS_LINE))
+        .grid_color(rgba(COLOR_AXIS_GRID_MEDIUM))
+        .grid_width(AXIS_GRID_WIDTH)
+        .auto_margin(true)
 }
 
 fn prepare_change_series(
@@ -1758,27 +1770,27 @@ mod tests {
     }
 
     #[test]
-    fn main_plot_adds_unspecified_change_trace_on_lower_panel() {
+    fn main_plot_adds_unspecified_change_trace_on_third_panel() {
         let chart = build_chart_from_csv(SAMPLE_GRAY_ZONE_CSV);
         let traces = collect_main_traces(&chart);
 
-        let lower_panel_trace = traces
+        let third_panel_trace = traces
             .iter()
             .find(|trace| {
                 trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_CHANGE)
-                    && trace.get("xaxis").and_then(Value::as_str) == Some("x2")
-                    && trace.get("yaxis").and_then(Value::as_str) == Some("y2")
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x3")
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y3")
             })
-            .expect("unspecified change trace on lower panel not found");
+            .expect("unspecified change trace on third panel not found");
         assert_eq!(
-            lower_panel_trace.get("fill").and_then(Value::as_str),
+            third_panel_trace.get("fill").and_then(Value::as_str),
             Some("tonexty")
         );
         assert_eq!(
-            lower_panel_trace.get("visible").and_then(Value::as_str),
+            third_panel_trace.get("visible").and_then(Value::as_str),
             Some("legendonly")
         );
-        let values = lower_panel_trace
+        let values = third_panel_trace
             .get("y")
             .and_then(Value::as_array)
             .expect("y values are missing");
@@ -1811,21 +1823,21 @@ mod tests {
         assert!(upper_x.iter().all(|date| *date >= threshold));
         assert!(upper_x.contains(&threshold));
 
-        let lower_gray_trace = traces
+        let unspecified_change_trace = traces
             .iter()
             .find(|trace| {
                 trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_CHANGE)
-                    && trace.get("xaxis").and_then(Value::as_str) == Some("x2")
-                    && trace.get("yaxis").and_then(Value::as_str) == Some("y2")
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x3")
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y3")
             })
-            .expect("lower gray-zone trace not found");
-        let lower_x = parse_trace_dates(lower_gray_trace);
+            .expect("unspecified change trace not found");
+        let change_x = parse_trace_dates(unspecified_change_trace);
         assert!(
-            !lower_x.is_empty(),
-            "lower gray-zone trace must not be empty"
+            !change_x.is_empty(),
+            "unspecified change trace must not be empty"
         );
-        assert!(lower_x.iter().all(|date| *date >= threshold));
-        assert!(lower_x.contains(&threshold));
+        assert!(change_x.iter().all(|date| *date >= threshold));
+        assert!(change_x.contains(&threshold));
     }
 
     #[test]
@@ -1854,21 +1866,21 @@ mod tests {
         assert!(upper_x.iter().all(|date| *date >= threshold));
         assert!(upper_x.contains(&threshold));
 
-        let lower_gray_trace = traces
+        let unspecified_change_trace = traces
             .iter()
             .find(|trace| {
                 trace.get("name").and_then(Value::as_str) == Some(LABEL_UNSPECIFIED_CHANGE)
-                    && trace.get("xaxis").and_then(Value::as_str) == Some("x2")
-                    && trace.get("yaxis").and_then(Value::as_str) == Some("y2")
+                    && trace.get("xaxis").and_then(Value::as_str) == Some("x3")
+                    && trace.get("yaxis").and_then(Value::as_str) == Some("y3")
             })
-            .expect("lower gray-zone trace not found");
-        let lower_x = parse_trace_dates(lower_gray_trace);
+            .expect("unspecified change trace not found");
+        let change_x = parse_trace_dates(unspecified_change_trace);
         assert!(
-            !lower_x.is_empty(),
-            "lower gray-zone trace must not be empty"
+            !change_x.is_empty(),
+            "unspecified change trace must not be empty"
         );
-        assert!(lower_x.iter().all(|date| *date >= threshold));
-        assert!(lower_x.contains(&threshold));
+        assert!(change_x.iter().all(|date| *date >= threshold));
+        assert!(change_x.contains(&threshold));
     }
 
     #[test]

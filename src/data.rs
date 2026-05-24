@@ -12,7 +12,7 @@ use tracing::{info, warn};
 
 use crate::fetch;
 
-const CSV_HEADER: &str = "time_index,hash,area,percent,area_type\n";
+const CSV_HEADER: [&str; 5] = ["time_index", "hash", "area", "percent", "area_type"];
 const FETCH_AREAS_CAPACITY: usize = 5000;
 const FETCH_CONCURRENCY: usize = 4;
 
@@ -49,14 +49,12 @@ pub fn to_csv(areas: Vec<Area>, file_path: &Path) -> Result<(), String> {
     let file = std::fs::File::create(file_path)
         .map_err(|err| format!("Failed to create CSV {}: {err}", file_path.display()))?;
     let mut writer = csv::Writer::from_writer(BufWriter::new(file));
-    writer
-        .write_record(CSV_HEADER.trim_end().split(','))
-        .map_err(|err| {
-            format!(
-                "Failed to write CSV header to {}: {err}",
-                file_path.display()
-            )
-        })?;
+    writer.write_record(CSV_HEADER).map_err(|err| {
+        format!(
+            "Failed to write CSV header to {}: {err}",
+            file_path.display()
+        )
+    })?;
     for area in areas {
         writer
             .write_record([

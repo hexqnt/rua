@@ -64,8 +64,9 @@ pub fn build_client() -> Client {
                 }
             }
         }
-        Err(e) => {
-            warn!(error = %e, "Couldn't interpret HTTPS_PROXY");
+        Err(env::VarError::NotPresent) => Client::new(),
+        Err(err) => {
+            warn!(error = %err, "Couldn't interpret HTTPS_PROXY");
             Client::new()
         }
     }

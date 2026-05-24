@@ -331,7 +331,7 @@ pub(super) fn render_plot_page(
                     }
                     #area-plot {
                         width: 100%;
-                        min-height: 640px;
+                        min-height: 760px;
                     }
                     #yoy-plot {
                         width: 100%;
@@ -350,7 +350,7 @@ pub(super) fn render_plot_page(
                     }
                     @media (max-width: 900px) {
                         .title { font-size: 22px; }
-                        #area-plot { min-height: 560px; }
+                        #area-plot { min-height: 680px; }
                         #yoy-plot { min-height: 500px; }
                         .table-grid { grid-template-columns: 1fr; }
                         .hero-aside { width: 100%; align-items: flex-start; }
