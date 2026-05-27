@@ -463,46 +463,32 @@ fn resolve_app_config(config: AppConfigFile, cwd: &Path) -> Result<AppConfig, St
         avg_change_start: config.chart.avg_change_start,
     };
 
-    let run = RunConfig {
-        output_html: resolve_runtime_path_from(&config.run.output_html, cwd),
-        minify_html: config.run.minify_html,
-        output_history_csv: resolve_runtime_path_from(&config.run.output_history_csv, cwd),
-        output_forecast_csv: resolve_runtime_path_from(&config.run.output_forecast_csv, cwd),
-        horizon_days: config.run.horizon_days,
-    };
-
-    let download = DownloadConfig {
-        output_csv: resolve_runtime_path_from(&config.download.output_csv, cwd),
-    };
-
-    let forecast = ForecastConfig {
-        csv: resolve_runtime_path_from(&config.forecast.csv, cwd),
-        output_csv: resolve_runtime_path_from(&config.forecast.output_csv, cwd),
-        horizon_days: config.forecast.horizon_days,
-    };
-
-    let render_mode = if let Some(path) = config.render.forecast_csv {
-        Some(RenderConfig {
-            csv: resolve_runtime_path_from(&config.render.csv, cwd),
-            forecast_csv: resolve_runtime_path_from(&path, cwd),
-            output_html: resolve_runtime_path_from(&config.render.output_html, cwd),
-            minify_html: config.render.minify_html,
-        })
-    } else {
-        None
-    };
-
     let mode_config = match config.mode {
-        Mode::Run => ModeConfig::Run(run),
-        Mode::Download => ModeConfig::Download(download),
-        Mode::Forecast => ModeConfig::Forecast(forecast),
+        Mode::Run => ModeConfig::Run(RunConfig {
+            output_html: resolve_runtime_path_from(&config.run.output_html, cwd),
+            minify_html: config.run.minify_html,
+            output_history_csv: resolve_runtime_path_from(&config.run.output_history_csv, cwd),
+            output_forecast_csv: resolve_runtime_path_from(&config.run.output_forecast_csv, cwd),
+            horizon_days: config.run.horizon_days,
+        }),
+        Mode::Download => ModeConfig::Download(DownloadConfig {
+            output_csv: resolve_runtime_path_from(&config.download.output_csv, cwd),
+        }),
+        Mode::Forecast => ModeConfig::Forecast(ForecastConfig {
+            csv: resolve_runtime_path_from(&config.forecast.csv, cwd),
+            output_csv: resolve_runtime_path_from(&config.forecast.output_csv, cwd),
+            horizon_days: config.forecast.horizon_days,
+        }),
         Mode::Render => {
-            let Some(render) = render_mode else {
-                return Err(
-                    "Field render.forecast_csv is required when mode = \"render\"".to_string(),
-                );
-            };
-            ModeConfig::Render(render)
+            let forecast_csv = config.render.forecast_csv.ok_or_else(|| {
+                "Field render.forecast_csv is required when mode = \"render\"".to_string()
+            })?;
+            ModeConfig::Render(RenderConfig {
+                csv: resolve_runtime_path_from(&config.render.csv, cwd),
+                forecast_csv: resolve_runtime_path_from(&forecast_csv, cwd),
+                output_html: resolve_runtime_path_from(&config.render.output_html, cwd),
+                minify_html: config.render.minify_html,
+            })
         }
     };
 

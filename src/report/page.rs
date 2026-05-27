@@ -603,40 +603,33 @@ struct TableRows {
 }
 
 fn build_country_rows(latest_area_sq_km: f64, forecast_area_sq_km: Option<f64>) -> TableRows {
-    let countries = UNFRIENDLY_COUNTRIES
-        .iter()
-        .map(|(name, area, flag)| {
-            let ratio_value = latest_area_sq_km / *area;
-            let forecast_ratio = forecast_area_sq_km
-                .map(|forecast_area| forecast_area / *area)
-                .map_or_else(|| "—".to_string(), |value| format!("{value:.2}x"));
-            CountryRow {
-                name,
-                flag,
-                ratio: format!("{ratio_value:.2}x"),
-                ratio_value,
-                forecast_ratio,
-            }
-        })
-        .collect::<Vec<_>>();
+    fn build_rows(
+        entries: &[(&'static str, f64, &'static str)],
+        latest_area_sq_km: f64,
+        forecast_area_sq_km: Option<f64>,
+    ) -> Vec<CountryRow> {
+        entries
+            .iter()
+            .map(|(name, area, flag)| {
+                let ratio_value = latest_area_sq_km / *area;
+                let forecast_ratio = forecast_area_sq_km
+                    .map(|forecast_area| forecast_area / *area)
+                    .map_or_else(|| "—".to_string(), |value| format!("{value:.2}x"));
+                CountryRow {
+                    name,
+                    flag,
+                    ratio: format!("{ratio_value:.2}x"),
+                    ratio_value,
+                    forecast_ratio,
+                }
+            })
+            .collect()
+    }
 
-    let states = US_STATES
-        .iter()
-        .map(|(name, area, flag)| {
-            let ratio_value = latest_area_sq_km / *area;
-            let forecast_ratio = forecast_area_sq_km
-                .map(|forecast_area| forecast_area / *area)
-                .map_or_else(|| "—".to_string(), |value| format!("{value:.2}x"));
-            CountryRow {
-                name,
-                flag,
-                ratio: format!("{ratio_value:.2}x"),
-                ratio_value,
-                forecast_ratio,
-            }
-        })
-        .collect::<Vec<_>>();
-    TableRows { countries, states }
+    TableRows {
+        countries: build_rows(UNFRIENDLY_COUNTRIES, latest_area_sq_km, forecast_area_sq_km),
+        states: build_rows(US_STATES, latest_area_sq_km, forecast_area_sq_km),
+    }
 }
 
 fn format_change(value: Option<f64>, unit: &str) -> String {

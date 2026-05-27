@@ -488,7 +488,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
                     .width(LINE_WIDTH_CHANGE)
                     .simplify(true),
             )
-            .visible(Visible::LegendOnly)
+            .visible(Visible::True)
             .name(LABEL_UNSPECIFIED_CHANGE)
             .x_axis(AXIS_UNSPECIFIED_CHANGE_X)
             .y_axis(AXIS_UNSPECIFIED_CHANGE_Y),
@@ -1786,10 +1786,7 @@ mod tests {
             third_panel_trace.get("fill").and_then(Value::as_str),
             Some("tonexty")
         );
-        assert_eq!(
-            third_panel_trace.get("visible").and_then(Value::as_str),
-            Some("legendonly")
-        );
+        assert_eq!(third_panel_trace.get("visible"), Some(&Value::Bool(true)));
         let values = third_panel_trace
             .get("y")
             .and_then(Value::as_array)

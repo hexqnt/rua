@@ -72,6 +72,24 @@ pub fn build_client() -> Client {
     }
 }
 
+/// Логирует ошибку запроса с уровнем `warn`, включая HTTP-статус если доступен.
+fn warn_request_failed(attempt: u32, error: &Error) {
+    if let Some(status) = error.status() {
+        warn!(attempt, status = %status, error = %error, "HTTP request failed");
+    } else {
+        warn!(attempt, error = %error, "HTTP request failed");
+    }
+}
+
+/// Логирует попытку повтора с уровнем `warn`, включая HTTP-статус если доступен.
+fn warn_retrying(attempt: u32, error: &Error) {
+    if let Some(status) = error.status() {
+        warn!(attempt, status = %status, error = %error, "Retrying request");
+    } else {
+        warn!(attempt, error = %error, "Retrying request");
+    }
+}
+
 /// Запрашивает историю площадей по timestamp и повторяет попытки при сетевых/HTTP ошибках.
 pub async fn fetch_url(
     client: &Client,
@@ -82,55 +100,26 @@ pub async fn fetch_url(
     let url = format!("{HISTORY_API_BASE}/{timestamp}/areas");
     let mut last_error: Option<Error> = None;
     for attempt in 0..max_retries {
+        let attempt_number = attempt + 1;
         match client.get(&url).send().await {
             Ok(response) => match response.error_for_status() {
                 Ok(success_response) => {
                     return success_response.bytes().await.map_err(FetchError::Request);
                 }
                 Err(err) => {
-                    if let Some(status) = err.status() {
-                        warn!(
-                            attempt = attempt + 1,
-                            status = %status,
-                            error = %err,
-                            "HTTP request failed"
-                        );
-                    } else {
-                        warn!(
-                            attempt = attempt + 1,
-                            error = %err,
-                            "HTTP request failed"
-                        );
-                    }
+                    warn_request_failed(attempt_number, &err);
                     last_error = Some(err);
                 }
             },
             Err(err) => {
-                warn!(
-                    attempt = attempt + 1,
-                    error = %err,
-                    "HTTP request failed"
-                );
+                warn_request_failed(attempt_number, &err);
                 last_error = Some(err);
             }
         }
 
         if attempt + 1 < max_retries {
-            if let Some(error) = &last_error {
-                if let Some(status) = error.status() {
-                    warn!(
-                        attempt = attempt + 1,
-                        status = %status,
-                        error = %error,
-                        "Retrying request"
-                    );
-                } else {
-                    warn!(
-                        attempt = attempt + 1,
-                        error = %error,
-                        "Retrying request"
-                    );
-                }
+            if let Some(ref error) = last_error {
+                warn_retrying(attempt_number, error);
             }
             tokio::time::sleep(delay).await;
         }
