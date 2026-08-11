@@ -36,14 +36,17 @@ pub(super) fn render_plot_page(
 ) -> String {
     let main_plot_html = main_plot.to_inline_html(Some("area-plot"));
     let yoy_plot_html = yoy_plot.to_inline_html(Some("yoy-plot"));
-    let latest_area_sq_km = summary.latest_area_km2 * 1000.0;
+    let latest_area_sq_km = summary.latest_area_thousand_km2 * 1000.0;
     let forecast_area_sq_km = summary
         .forecast
         .as_ref()
-        .map(|forecast| forecast.mean_km2 * 1000.0);
+        .map(|forecast| forecast.mean_thousand_km2 * 1000.0);
     let country_rows = build_country_rows(latest_area_sq_km, forecast_area_sq_km);
     let generated_label = generated_at.format(GENERATED_AT_FORMAT).to_string();
-    let latest_area_label = format!("{:.1} {UNIT_THOUSAND_KM2}", summary.latest_area_km2);
+    let latest_area_label = format!(
+        "{:.1} {UNIT_THOUSAND_KM2}",
+        summary.latest_area_thousand_km2
+    );
     let ukraine_percent_label = format!("{:.2}%", summary.ukraine_percent);
     let daily_change_label = format_change(summary.daily_change_km2, UNIT_KM2);
     let weekly_change_label = format_change(summary.weekly_change_km2, UNIT_KM2);
@@ -52,10 +55,10 @@ pub(super) fn render_plot_page(
     let forecast_card = summary.forecast.as_ref().map(|forecast| {
         (
             format!("Через {} дн.", forecast.horizon_days),
-            format!("{:.1} {UNIT_THOUSAND_KM2}", forecast.mean_km2),
+            format!("{:.1} {UNIT_THOUSAND_KM2}", forecast.mean_thousand_km2),
             format!(
                 "95%: {:.1}–{:.1} {UNIT_THOUSAND_KM2} · до {}",
-                forecast.lower_km2, forecast.upper_km2, forecast.end_date
+                forecast.lower_thousand_km2, forecast.upper_thousand_km2, forecast.end_date
             ),
         )
     });

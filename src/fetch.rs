@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
 use reqwest::{Client, Error};
 use serde::Deserialize;
 use std::time::Duration;
@@ -34,16 +33,9 @@ impl std::error::Error for FetchError {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct AreaItem {
     pub id: i64,
-    #[serde(rename = "updatedAt")]
-    pub updated_at: DateTime<Utc>,
-    pub datetime: String,
-    pub status: bool,
-    #[serde(rename = "createdAt")]
-    pub created_at: DateTime<Utc>,
 }
 
 pub fn build_client() -> Client {

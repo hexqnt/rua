@@ -103,8 +103,6 @@ struct CsvRow {
     #[serde(rename = "hash", deserialize_with = "deserialize_hash_kind")]
     hash_kind: HashKind,
     area: f64,
-    #[allow(dead_code)]
-    percent: f64,
     #[serde(
         alias = "type",
         alias = "area_type",

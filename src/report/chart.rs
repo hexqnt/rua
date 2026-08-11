@@ -17,7 +17,7 @@ use plotly::layout::{
 };
 use plotly::{BoxPlot, Configuration, Plot, Scatter};
 
-use crate::constants::{AREA_THOUSANDS_DIVISOR, DATE_FORMAT};
+use crate::constants::AREA_THOUSANDS_DIVISOR;
 use crate::series::{AreaBuckets, build_occupied_and_unspecified_series, load_area_buckets};
 
 #[derive(Clone, Debug)]
@@ -62,7 +62,7 @@ pub(super) struct ChartSummary {
     /// Дата последнего доступного среза (YYYY-MM-DD).
     pub latest_date: String,
     /// Текущая площадь в тыс. км².
-    pub latest_area_km2: f64,
+    pub latest_area_thousand_km2: f64,
     /// Доля от площади Украины (в процентах).
     pub ukraine_percent: f64,
     /// Изменение за сутки в км² (может отсутствовать при коротком ряде).
@@ -78,9 +78,9 @@ pub(super) struct ChartSummary {
 pub(super) struct ForecastSummary {
     pub horizon_days: usize,
     pub end_date: String,
-    pub mean_km2: f64,
-    pub lower_km2: f64,
-    pub upper_km2: f64,
+    pub mean_thousand_km2: f64,
+    pub lower_thousand_km2: f64,
+    pub upper_thousand_km2: f64,
 }
 
 pub(super) struct ChartOutput {
@@ -277,19 +277,8 @@ fn usize_to_f64(value: usize, context: &str) -> f64 {
     )
 }
 
-/// Строит Plotly-график (и возвращает последний уровень площади) без прогноза.
-#[allow(dead_code)]
-pub(super) fn build_area_chart(
-    csv_path: &Path,
-    forecast: Option<&ForecastOverlay>,
-) -> Result<ChartOutput, Box<dyn Error>> {
-    let buckets = load_area_buckets(csv_path)?;
-    let render_config = ChartRenderConfig::default();
-    build_area_chart_from_buckets_with_config(&buckets, forecast, render_config)
-}
-
+#[cfg(test)]
 #[allow(clippy::too_many_lines)]
-#[allow(dead_code)]
 pub(super) fn build_area_chart_from_buckets(
     buckets: &AreaBuckets,
     forecast: Option<&ForecastOverlay>,
@@ -307,8 +296,7 @@ pub(super) fn build_area_chart_with_config(
     build_area_chart_from_buckets_with_config(&buckets, forecast, render_config)
 }
 
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::large_stack_frames)]
+#[allow(clippy::large_stack_frames, clippy::too_many_lines)]
 pub(super) fn build_area_chart_from_buckets_with_config(
     buckets: &AreaBuckets,
     forecast: Option<&ForecastOverlay>,
@@ -318,16 +306,13 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     let dates = occupied_series.dates;
     let occupied_area = occupied_series.occupied;
     let unspecified_area = occupied_series.unspecified;
-    let area_dates = dates
-        .iter()
-        .map(|date| date.format(DATE_FORMAT).to_string())
-        .collect_vec();
-    let area_km2 = occupied_area
+    let area_dates = dates.iter().map(ToString::to_string).collect_vec();
+    let area_thousand_km2 = occupied_area
         .iter()
         .map(|value| value / AREA_THOUSANDS_DIVISOR)
         .collect_vec();
-    let latest_area_km2 = area_km2.last().copied().unwrap_or_default();
-    let latest_area_sq_km = latest_area_km2 * AREA_THOUSANDS_DIVISOR;
+    let latest_area_thousand_km2 = area_thousand_km2.last().copied().unwrap_or_default();
+    let latest_area_sq_km = latest_area_thousand_km2 * AREA_THOUSANDS_DIVISOR;
     let ukraine_percent = if UKRAINE_AREA_SQ_KM > 0.0 {
         latest_area_sq_km / UKRAINE_AREA_SQ_KM * 100.0
     } else {
@@ -337,7 +322,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
         .last()
         .copied()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no dates available"))?;
-    let latest_date_label = latest_date.format(DATE_FORMAT).to_string();
+    let latest_date_label = latest_date.to_string();
     let daily_change_km2 = if occupied_area.len() >= 2 {
         Some(occupied_area[occupied_area.len() - 1] - occupied_area[occupied_area.len() - 2])
     } else {
@@ -351,13 +336,14 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     let change_series =
         prepare_change_series(&dates, &occupied_area, render_config.avg_change_start);
 
-    let (area_dates_plot, area_km2_plot, area_upper_km2_plot) = prepare_unspecified_area_plot(
-        &dates,
-        &area_dates,
-        &area_km2,
-        &unspecified_area,
-        render_config.gray_zone_start,
-    );
+    let (area_dates_plot, area_thousand_km2_plot, area_upper_thousand_km2_plot) =
+        prepare_unspecified_area_plot(
+            &dates,
+            &area_dates,
+            &area_thousand_km2,
+            &unspecified_area,
+            render_config.gray_zone_start,
+        );
     let unspecified_change_plot = prepare_unspecified_change_plot(
         &change_series,
         &dates,
@@ -365,8 +351,8 @@ pub(super) fn build_area_chart_from_buckets_with_config(
         render_config.gray_zone_start,
         MAX_PLOT_POINTS / 2,
     );
-    let (area_dates_actual_plot, area_km2_actual_plot) =
-        downsample_min_max(&area_dates, &area_km2, MAX_PLOT_POINTS);
+    let (area_dates_actual_plot, area_thousand_km2_actual_plot) =
+        downsample_min_max(&area_dates, &area_thousand_km2, MAX_PLOT_POINTS);
     let (change_dates_plot, change_values_plot) = downsample_min_max(
         &change_series.labels,
         &change_series.values,
@@ -376,7 +362,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     let mut plot = Plot::new();
     if !area_dates_plot.is_empty() {
         plot.add_trace(
-            Scatter::new(area_dates_plot.clone(), area_km2_plot)
+            Scatter::new(area_dates_plot.clone(), area_thousand_km2_plot)
                 .mode(Mode::Lines)
                 .line(Line::new().color(rgba(COLOR_UNSPECIFIED_TRANSPARENT)))
                 .show_legend(false)
@@ -384,7 +370,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
                 .y_axis(AXIS_MAIN_Y),
         );
         plot.add_trace(
-            Scatter::new(area_dates_plot, area_upper_km2_plot)
+            Scatter::new(area_dates_plot, area_upper_thousand_km2_plot)
                 .mode(Mode::Lines)
                 .fill(Fill::ToNextY)
                 .fill_color(rgba(COLOR_UNSPECIFIED_BAND))
@@ -396,7 +382,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
         );
     }
     plot.add_trace(
-        Scatter::new(area_dates_actual_plot, area_km2_actual_plot)
+        Scatter::new(area_dates_actual_plot, area_thousand_km2_actual_plot)
             .mode(Mode::Lines)
             .line(
                 Line::new()
@@ -409,8 +395,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
             .y_axis(AXIS_MAIN_Y),
     );
 
-    let forecast_ref = forecast;
-    if let Some(forecast) = forecast_ref
+    if let Some(forecast) = forecast
         && !forecast.dates.is_empty()
     {
         plot.add_trace(
@@ -496,7 +481,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     }
 
     let mut annotations = Vec::new();
-    if let (Some(last_date), Some(last_value)) = (area_dates.last(), area_km2.last()) {
+    if let (Some(last_date), Some(last_value)) = (area_dates.last(), area_thousand_km2.last()) {
         annotations.push(
             Annotation::new()
                 .text(format!("{last_value:.1} {UNIT_THOUSAND_KM2}"))
@@ -525,7 +510,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
                 .border_width(LINE_WIDTH_MARKER),
         );
     }
-    if let Some(forecast) = forecast_ref
+    if let Some(forecast) = forecast
         && let (Some(last_date), Some(last_mean)) = (forecast.dates.last(), forecast.mean.last())
     {
         annotations.push(
@@ -596,28 +581,24 @@ pub(super) fn build_area_chart_from_buckets_with_config(
         );
     }
 
-    let reference_dates = [change_series.baseline];
-    let marker_shapes: Vec<Shape> = reference_dates
-        .iter()
-        .map(|date| {
-            let date_str = date.format(DATE_FORMAT).to_string();
-            Shape::new()
-                .shape_type(ShapeType::Line)
-                .layer(ShapeLayer::Below)
-                .x_ref(AXIS_REF_X)
-                .y_ref(AXIS_REF_PAPER)
-                .x0(date_str.clone())
-                .x1(date_str)
-                .y0(0)
-                .y1(1)
-                .line(
-                    ShapeLine::new()
-                        .color(rgba(COLOR_MARKER_LINE))
-                        .width(LINE_WIDTH_MARKER)
-                        .dash(DashType::Dash),
-                )
-        })
-        .collect();
+    let baseline_label = change_series.baseline.to_string();
+    let marker_shapes = vec![
+        Shape::new()
+            .shape_type(ShapeType::Line)
+            .layer(ShapeLayer::Below)
+            .x_ref(AXIS_REF_X)
+            .y_ref(AXIS_REF_PAPER)
+            .x0(baseline_label.clone())
+            .x1(baseline_label)
+            .y0(0)
+            .y1(1)
+            .line(
+                ShapeLine::new()
+                    .color(rgba(COLOR_MARKER_LINE))
+                    .width(LINE_WIDTH_MARKER)
+                    .dash(DashType::Dash),
+            ),
+    ];
 
     let layout = Layout::new()
         .font(
@@ -671,20 +652,17 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     plot.set_configuration(Configuration::new().responsive(true));
     let yoy_plot = build_yoy_chart(&change_series.dates, &change_series.values);
 
-    let forecast_summary = forecast_ref.and_then(|forecast| {
-        if forecast.dates.is_empty() {
-            return None;
-        }
-        let end_date = forecast.dates.last().cloned().unwrap_or_default();
-        let mean_km2 = *forecast.mean.last().unwrap_or(&0.0);
-        let lower_km2 = *forecast.lower.last().unwrap_or(&0.0);
-        let upper_km2 = *forecast.upper.last().unwrap_or(&0.0);
+    let forecast_summary = forecast.and_then(|forecast| {
+        let end_date = forecast.dates.last()?.clone();
+        let mean_thousand_km2 = forecast.mean.last().copied()?;
+        let lower_thousand_km2 = forecast.lower.last().copied()?;
+        let upper_thousand_km2 = forecast.upper.last().copied()?;
         Some(ForecastSummary {
             horizon_days: forecast.dates.len(),
             end_date,
-            mean_km2,
-            lower_km2,
-            upper_km2,
+            mean_thousand_km2,
+            lower_thousand_km2,
+            upper_thousand_km2,
         })
     });
 
@@ -693,7 +671,7 @@ pub(super) fn build_area_chart_from_buckets_with_config(
         yoy_plot,
         summary: ChartSummary {
             latest_date: latest_date_label,
-            latest_area_km2,
+            latest_area_thousand_km2,
             ukraine_percent,
             daily_change_km2,
             weekly_change_km2,
@@ -788,10 +766,7 @@ fn prepare_change_series(
         .filter_map(|(date, value)| value.map(|v| (*date, v)))
         .filter(|(date, _)| *date >= baseline)
         .unzip::<_, _, Vec<_>, Vec<_>>();
-    let labels = filtered_dates
-        .iter()
-        .map(|date| date.format(DATE_FORMAT).to_string())
-        .collect();
+    let labels = filtered_dates.iter().map(ToString::to_string).collect();
 
     PreparedChangeSeries {
         baseline,
@@ -1070,7 +1045,7 @@ fn build_yoy_envelope(change_dates: &[NaiveDate], change_values: &[f64]) -> Opti
     let mut lower = Vec::with_capacity(envelope.len());
     let mut upper = Vec::with_capacity(envelope.len());
     for (date, (min_value, max_value)) in envelope {
-        dates.push(date.format(DATE_FORMAT).to_string());
+        dates.push(date.to_string());
         lower.push(min_value);
         upper.push(max_value);
     }
@@ -1104,7 +1079,7 @@ fn build_yoy_stddev_series(
         if day_values.len() < 2 {
             continue;
         }
-        dates.push(date.format(DATE_FORMAT).to_string());
+        dates.push(date.to_string());
         values.push(stddev(&day_values));
     }
 
@@ -1132,7 +1107,7 @@ fn stddev(values: &[f64]) -> f64 {
 }
 
 fn normalize_to_yoy_day(date: NaiveDate) -> String {
-    normalized_yoy_date(date).format(DATE_FORMAT).to_string()
+    normalized_yoy_date(date).to_string()
 }
 
 fn normalized_yoy_date(date: NaiveDate) -> NaiveDate {
@@ -1147,27 +1122,6 @@ fn yoy_line_alpha(index: usize, total: usize) -> f64 {
     let position = usize_to_f64(index, "yoy_line_alpha");
     let span = usize_to_f64(total - 1, "yoy_line_alpha");
     (YOY_LINE_ALPHA_MAX - YOY_LINE_ALPHA_MIN).mul_add(position / span, YOY_LINE_ALPHA_MIN)
-}
-
-/// Находит последний локальный максимум за год для потенциальной пометки на графике.
-#[allow(dead_code)]
-fn peak_annotation(values: &[f64]) -> Option<(usize, f64)> {
-    const OFFSET: usize = 60;
-    if values.len() <= OFFSET {
-        return None;
-    }
-    let start = values.len().saturating_sub(365 + OFFSET);
-    let end = values.len().saturating_sub(OFFSET);
-
-    values
-        .iter()
-        .enumerate()
-        .take(end)
-        .skip(start)
-        .max_by(|(_, left), (_, right)| {
-            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(idx, value)| (idx, *value))
 }
 
 /// Считает посуточные изменения, сохраняя длину ряда (первое значение = 0).
@@ -1395,21 +1349,27 @@ fn filter_shared_series_from_date<X: Clone>(
 fn prepare_unspecified_area_plot(
     dates: &[NaiveDate],
     area_dates: &[String],
-    area_km2: &[f64],
+    area_thousand_km2: &[f64],
     unspecified_area: &[f64],
     start_date: NaiveDate,
 ) -> (Vec<String>, Vec<f64>, Vec<f64>) {
-    let area_upper_km2 = area_km2
+    let area_upper_thousand_km2 = area_thousand_km2
         .iter()
         .zip(unspecified_area.iter())
         .map(|(occupied, unspecified)| occupied + unspecified / AREA_THOUSANDS_DIVISOR)
         .collect_vec();
-    let (area_dates_filtered, area_km2_filtered, area_upper_km2_filtered) =
-        filter_shared_series_from_date(dates, area_dates, area_km2, &area_upper_km2, start_date);
+    let (area_dates_filtered, area_thousand_km2_filtered, area_upper_thousand_km2_filtered) =
+        filter_shared_series_from_date(
+            dates,
+            area_dates,
+            area_thousand_km2,
+            &area_upper_thousand_km2,
+            start_date,
+        );
     downsample_min_max_shared_x(
         &area_dates_filtered,
-        &area_km2_filtered,
-        &area_upper_km2_filtered,
+        &area_thousand_km2_filtered,
+        &area_upper_thousand_km2_filtered,
         MAX_PLOT_POINTS,
     )
 }
@@ -1963,8 +1923,7 @@ mod tests {
             100,
         );
 
-        assert!(!plot.dates.is_empty());
-        assert_eq!(plot.dates[0], "2023-02-05");
+        assert_eq!(plot.dates.first().map(String::as_str), Some("2023-02-05"));
         assert_eq!(plot.reference_values, vec![100.0, 101.0, 102.0]);
         assert_eq!(plot.values.len(), 3);
         assert!((plot.values[0] - 101.0).abs() < 1e-12);

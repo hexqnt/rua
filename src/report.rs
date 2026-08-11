@@ -31,30 +31,6 @@ impl Default for DownloadLinks {
     }
 }
 
-/// Собирает и сохраняет Plotly-график без прогноза (как в прежней Python-версии).
-#[allow(dead_code)]
-pub fn draw_area_chart(csv_path: &Path, output_html: &Path) -> Result<(), Box<dyn Error>> {
-    draw_area_chart_with_forecast(csv_path, output_html, None, None, false)
-}
-
-pub fn draw_area_chart_with_forecast(
-    csv_path: &Path,
-    output_html: &Path,
-    forecast: Option<&ForecastOverlay>,
-    download_links: Option<DownloadLinks>,
-    minify_html: bool,
-) -> Result<(), Box<dyn Error>> {
-    let render_config = ChartRenderConfig::default();
-    draw_area_chart_with_forecast_and_config(
-        csv_path,
-        output_html,
-        forecast,
-        render_config,
-        download_links,
-        minify_html,
-    )
-}
-
 pub fn draw_area_chart_with_forecast_and_config(
     csv_path: &Path,
     output_html: &Path,
@@ -73,25 +49,6 @@ pub fn draw_area_chart_with_forecast_and_config(
         &yoy_plot,
         &summary,
         output_html,
-        download_links,
-        minify_html,
-    )
-}
-
-#[allow(dead_code)]
-pub fn draw_area_chart_with_forecast_from_buckets(
-    buckets: &AreaBuckets,
-    output_html: &Path,
-    forecast: Option<&ForecastOverlay>,
-    download_links: Option<DownloadLinks>,
-    minify_html: bool,
-) -> Result<(), Box<dyn Error>> {
-    let render_config = ChartRenderConfig::default();
-    draw_area_chart_with_forecast_from_buckets_and_config(
-        buckets,
-        output_html,
-        forecast,
-        render_config,
         download_links,
         minify_html,
     )

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -77,15 +75,14 @@ impl Default for ModelConfig {
 
 #[derive(Clone, Debug)]
 pub struct FittedModel {
-    pub sigma_level: f64,
-    pub sigma_trend: f64,
-    pub sigma_obs: f64,
-    pub state: [f64; 2],
-    pub cov: [[f64; 2]; 2],
-    pub last_date: NaiveDate,
-    pub scale: f64,
-    pub nll: f64,
-    pub last_weight: f64,
+    sigma_level: f64,
+    sigma_trend: f64,
+    sigma_obs: f64,
+    state: [f64; 2],
+    cov: [[f64; 2]; 2],
+    last_date: NaiveDate,
+    scale: f64,
+    last_weight: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -169,7 +166,7 @@ pub fn write_forecast_csv(forecast: &Forecast, output_path: &Path) -> Result<(),
     writer.write_record(["date", "mean", "lower", "upper", "variance"])?;
 
     for (idx, date) in forecast.dates.iter().enumerate() {
-        let date = date.format(DATE_FORMAT).to_string();
+        let date = date.to_string();
         writer.write_record([
             date,
             format!("{:.6}", forecast.mean[idx]),
@@ -299,7 +296,6 @@ pub fn train_from_series(
         cov: filter.cov,
         last_date,
         scale,
-        nll: filter.nll,
         last_weight,
     })
 }
@@ -423,6 +419,8 @@ impl FittedModel {
 }
 
 impl TrendFilterModel {
+    // Явная FMA здесь превращается в libcall на generic x86 и не окупается для короткого прогноза.
+    #[allow(clippy::suboptimal_flops)]
     pub fn forecast(&self, horizon_days: usize) -> Forecast {
         let mut dates = Vec::with_capacity(horizon_days);
         let mut mean = Vec::with_capacity(horizon_days);
@@ -495,6 +493,8 @@ impl CostFunction for TrendFilterProblem {
     type Param = Vec<f64>;
     type Output = f64;
 
+    // Внешняя FMA-аккумуляция вызывает дорогой libcall в generic x86-сборке.
+    #[allow(clippy::suboptimal_flops)]
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, ArgminError> {
         if param.len() != self.y.len() {
             return Ok(LARGE_COST);
@@ -520,15 +520,18 @@ impl Gradient for TrendFilterProblem {
     type Param = Vec<f64>;
     type Gradient = Vec<f64>;
 
+    // Внешняя FMA-аккумуляция вызывает дорогой libcall в generic x86-сборке.
+    #[allow(clippy::suboptimal_flops)]
     fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, ArgminError> {
         if param.len() != self.y.len() {
             return Ok(vec![0.0; param.len()]);
         }
-        let mut grad = vec![0.0; param.len()];
         let delta = self.huber_delta.max(1e-6);
-        for (idx, (value, target)) in param.iter().zip(self.y.iter()).enumerate() {
-            grad[idx] += huber_grad(value - target, delta);
-        }
+        let mut grad = param
+            .iter()
+            .zip(&self.y)
+            .map(|(value, target)| huber_grad(value - target, delta))
+            .collect::<Vec<_>>();
         if param.len() >= 3 && self.lambda > 0.0 {
             let eps2 = self.epsilon * self.epsilon;
             for idx in 2..param.len() {
@@ -540,7 +543,7 @@ impl Gradient for TrendFilterProblem {
                     0.0
                 };
                 grad[idx] += g;
-                grad[idx - 1] += -2.0 * g;
+                grad[idx - 1] -= 2.0 * g;
                 grad[idx - 2] += g;
             }
         }
@@ -617,6 +620,8 @@ struct FilterResult {
     cov: [[f64; 2]; 2],
 }
 
+// Дополнительные FMA в последовательном фильтре вызывают дорогие libcalls на generic x86.
+#[allow(clippy::suboptimal_flops)]
 fn kalman_filter(
     y: &[f64],
     sigma_level: f64,
@@ -681,7 +686,10 @@ fn kalman_filter(
         cov[1][0] = cov[0][1];
         cov[1][1] = p11 - k1 * p01;
 
-        nll += 0.5 * ((2.0 * std::f64::consts::PI * s).ln() + (innovation * innovation) / s);
+        nll = 0.5_f64.mul_add(
+            (2.0 * std::f64::consts::PI * s).ln() + (innovation * innovation) / s,
+            nll,
+        );
     }
 
     FilterResult { nll, state, cov }
@@ -831,7 +839,7 @@ fn load_target_series_from_buckets(
         }
     }
     if filtered_dates.is_empty() {
-        return Err(format!("no training data after {}", cutoff.format(DATE_FORMAT)).into());
+        return Err(format!("no training data after {cutoff}").into());
     }
     Ok((filtered_dates, filtered_values))
 }

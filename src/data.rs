@@ -1,6 +1,6 @@
 //! Вспомогательные функции для загрузки данных и записи CSV.
 
-use std::io::BufWriter;
+use std::io::{BufWriter, IsTerminal};
 use std::path::Path;
 use std::time::Duration;
 
@@ -13,8 +13,7 @@ use tracing::{info, warn};
 use crate::fetch;
 
 const CSV_HEADER: [&str; 5] = ["time_index", "hash", "area", "percent", "area_type"];
-const FETCH_AREAS_CAPACITY: usize = 5000;
-const FETCH_CONCURRENCY: usize = 4;
+const MAX_CONCURRENT_FETCHES: usize = 16;
 
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
@@ -39,7 +38,7 @@ where
 }
 
 /// Записывает точки площадей в CSV, создавая директорию при необходимости.
-pub fn to_csv(areas: Vec<Area>, file_path: &Path) -> Result<(), String> {
+pub fn to_csv(areas: &[Area], file_path: &Path) -> Result<(), String> {
     if let Some(parent) = file_path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -56,15 +55,21 @@ pub fn to_csv(areas: Vec<Area>, file_path: &Path) -> Result<(), String> {
         )
     })?;
     for area in areas {
+        let time_index = area.time_index.to_string();
         writer
-            .write_record([
-                area.time_index.to_string(),
-                area.hash,
-                area.area.to_string(),
-                area.percent.to_string(),
-                area.area_type,
-            ])
-            .map_err(|err| format!("Failed to write CSV row to {}: {err}", file_path.display()))?;
+            .serialize((
+                &time_index,
+                area.hash.as_str(),
+                area.area,
+                area.percent,
+                area.area_type.as_str(),
+            ))
+            .map_err(|err| {
+                format!(
+                    "Failed to serialize CSV row to {}: {err}",
+                    file_path.display()
+                )
+            })?;
     }
     writer
         .flush()
@@ -80,42 +85,44 @@ pub async fn fetch_areas(
 ) -> Result<Vec<Area>, String> {
     // Сначала получаем список временных отметок, по которым запрашиваем площади.
     info!("Fetching timestamps...");
-    let json_data = fetch::get_timestamps(client)
+    let timestamps_json = fetch::get_timestamps(client)
         .await
         .map_err(|err| format!("Failed to fetch timestamps: {err}"))?;
-    let result: Vec<fetch::AreaItem> = serde_json::from_slice(&json_data)
-        .map_err(|err| format!("Failed to deserialize JSON: {err}"))?;
+    let timestamps: Vec<fetch::AreaItem> = serde_json::from_slice(&timestamps_json)
+        .map_err(|err| format!("Failed to deserialize timestamps JSON: {err}"))?;
 
     // Затем скачиваем площади по каждой отметке.
-    let mut areas = Vec::with_capacity(FETCH_AREAS_CAPACITY);
-    let mut pbar = pbar(Some(result.len()));
-    let stream = stream::iter(result).map(|area_item| async move {
+    let mut areas = Vec::new();
+    let mut progress = std::io::stderr()
+        .is_terminal()
+        .then(|| pbar(Some(timestamps.len())));
+    let requests = stream::iter(timestamps).map(|area_item| async move {
         let timestamp = area_item.id;
-        let content = fetch::fetch_url(client, timestamp, max_retries, delay)
+        let areas_json = fetch::fetch_url(client, timestamp, max_retries, delay)
             .await
-            .map_err(|err| format!("Failed to fetch URL: {err:?}"))?;
-        let mut area: Vec<Area> = serde_json::from_slice(&content)
-            .map_err(|err| format!("Failed to deserialize JSON: {err}"))?;
+            .map_err(|err| format!("Failed to fetch areas for timestamp {timestamp}: {err}"))?;
+        let mut items: Vec<Area> = serde_json::from_slice(&areas_json).map_err(|err| {
+            format!("Failed to deserialize areas for timestamp {timestamp}: {err}")
+        })?;
         let time_index = DateTime::<Utc>::from_timestamp(timestamp, 0)
-            .ok_or_else(|| "Failed to build timestamp".to_string())?;
-        for a in &mut area {
-            a.time_index = time_index;
+            .ok_or_else(|| format!("Timestamp is outside the supported range: {timestamp}"))?;
+        for item in &mut items {
+            item.time_index = time_index;
         }
-        Ok::<Vec<Area>, String>(area)
+        Ok::<Vec<Area>, String>(items)
     });
-    let mut buffered = stream.buffer_unordered(FETCH_CONCURRENCY);
+    let mut batches = requests.buffer_unordered(MAX_CONCURRENT_FETCHES);
 
-    while let Some(result) = buffered.next().await {
-        match result {
-            Ok(mut area) => {
-                areas.append(&mut area);
-            }
-            Err(err) => warn!(error = %err, "Failed to fetch the URL"),
-        }
-        if let Err(err) = pbar.update(1) {
+    while let Some(result) = batches.next().await {
+        let mut batch = result?;
+        areas.append(&mut batch);
+        if let Some(progress) = &mut progress
+            && let Err(err) = progress.update(1)
+        {
             warn!(error = %err, "Failed to update progress bar");
         }
     }
 
+    areas.sort_by_key(|area| area.time_index);
     Ok(areas)
 }

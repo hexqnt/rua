@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::constants::{AREA_THOUSANDS_DIVISOR, DATE_FORMAT};
+use crate::constants::AREA_THOUSANDS_DIVISOR;
 use crate::data::{fetch_areas, to_csv};
 use crate::series::AreaBuckets;
 use tracing_subscriber::EnvFilter;
@@ -374,27 +374,18 @@ struct ResolvedModelConfig {
 }
 
 fn build_forecast_overlay(forecast: &model::Forecast) -> report::ForecastOverlay {
+    let to_thousand_km2 = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value / AREA_THOUSANDS_DIVISOR)
+            .collect()
+    };
+
     report::ForecastOverlay {
-        dates: forecast
-            .dates
-            .iter()
-            .map(|date| date.format(DATE_FORMAT).to_string())
-            .collect(),
-        mean: forecast
-            .mean
-            .iter()
-            .map(|v| v / AREA_THOUSANDS_DIVISOR)
-            .collect(),
-        lower: forecast
-            .lower
-            .iter()
-            .map(|v| v / AREA_THOUSANDS_DIVISOR)
-            .collect(),
-        upper: forecast
-            .upper
-            .iter()
-            .map(|v| v / AREA_THOUSANDS_DIVISOR)
-            .collect(),
+        dates: forecast.dates.iter().map(ToString::to_string).collect(),
+        mean: to_thousand_km2(&forecast.mean),
+        lower: to_thousand_km2(&forecast.lower),
+        upper: to_thousand_km2(&forecast.upper),
     }
 }
 
@@ -585,7 +576,7 @@ async fn download_to_csv(output_csv: &Path) -> Result<(), String> {
     let delay = Duration::from_secs(FETCH_DELAY_SECS);
     let client = fetch::build_client();
     let areas = fetch_areas(&client, FETCH_MAX_RETRIES, delay).await?;
-    to_csv(areas, output_csv)?;
+    to_csv(&areas, output_csv)?;
     Ok(())
 }
 
