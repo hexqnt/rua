@@ -170,6 +170,14 @@ mod tests {
         include_bytes!("../../tests/fixtures/deepstatemap/timestamps.json");
     const AREAS_JSON: &[u8] = include_bytes!("../../tests/fixtures/deepstatemap/areas.json");
 
+    fn assert_float_eq(actual: f64, expected: f64) {
+        let tolerance = f64::EPSILON * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected}, got {actual}"
+        );
+    }
+
     #[test]
     fn parses_timestamps_from_api_fixture() {
         let timestamps = parse_timestamps(TIMESTAMPS_JSON).expect("fixture must be valid");
@@ -187,8 +195,8 @@ mod tests {
         assert_eq!(snapshot.timestamp(), timestamp);
         assert_eq!(snapshot.areas().len(), 4);
         assert_eq!(snapshot.areas()[0].hash(), "#a52714");
-        assert_eq!(snapshot.areas()[0].area(), 63_864.643_989_695_01);
-        assert_eq!(snapshot.areas()[0].percent(), 10.579);
+        assert_float_eq(snapshot.areas()[0].area(), 63_864.643_989_695_01);
+        assert_float_eq(snapshot.areas()[0].percent(), 10.579);
         assert_eq!(snapshot.areas()[0].kind(), "occupied_after_24_02_2022");
     }
 
@@ -209,8 +217,8 @@ mod tests {
         let (hash, value, percent, kind) = area.into_parts();
 
         assert_eq!(hash, "#a52714");
-        assert_eq!(value, 63_864.643_989_695_01);
-        assert_eq!(percent, 10.579);
+        assert_float_eq(value, 63_864.643_989_695_01);
+        assert_float_eq(percent, 10.579);
         assert_eq!(kind, "occupied_after_24_02_2022");
     }
 
