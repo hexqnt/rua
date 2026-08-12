@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1648989208,
+    "description": "Map update",
+    "descriptionEn": "",
+    "updatedAt": "2022-04-21T03:56:36.914Z",
+    "datetime": "03.04 o 14:33",
+    "status": true,
+    "createdAt": "2022-04-03T12:33:28.000Z"
+  },
+  {
+    "id": 1649004375,
+    "description": "Map correction",
+    "descriptionEn": "",
+    "updatedAt": "2022-04-21T03:56:40.012Z",
+    "datetime": "03.04 o 18:46",
+    "status": true,
+    "createdAt": "2022-04-03T16:46:15.000Z"
+  }
+]

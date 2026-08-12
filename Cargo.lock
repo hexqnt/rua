@@ -2782,6 +2782,7 @@ dependencies = [
  "itertools 0.15.0",
  "maud",
  "minify-html",
+ "pin-project-lite",
  "plotly",
  "reqwest",
  "serde",

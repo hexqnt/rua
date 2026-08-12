@@ -1,0 +1,26 @@
+[
+  {
+    "hash": "#a52714",
+    "area": 63864.64398969501,
+    "percent": "10.579",
+    "type": "occupied_after_24_02_2022"
+  },
+  {
+    "hash": "#880e4f",
+    "area": 46937.208199079774,
+    "percent": "7.775",
+    "type": "occupied_to_24_02_2022"
+  },
+  {
+    "hash": "#bcaaa4",
+    "area": 5587.522472006554,
+    "percent": "0.926",
+    "type": "unspecified"
+  },
+  {
+    "hash": "#0f9d58",
+    "area": 14012.88265182918,
+    "percent": "2.321",
+    "type": "liberated"
+  }
+]

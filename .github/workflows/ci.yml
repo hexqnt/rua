@@ -2,11 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [master, main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  quality:
+    name: Format and lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
   build-test:
+    name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -14,17 +39,13 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # Быстрый кэш для Cargo/target
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check
-        run: cargo check
-
       - name: Test
-        run: cargo test
+        run: cargo test --locked --all-targets --all-features

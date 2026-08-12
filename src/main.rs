@@ -1,6 +1,5 @@
 mod constants;
 mod data;
-mod fetch;
 mod model;
 mod report;
 mod series;
@@ -15,11 +14,11 @@ use std::fs::{self, File};
 use std::io::IsTerminal;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use crate::constants::AREA_THOUSANDS_DIVISOR;
-use crate::data::{fetch_areas, to_csv};
+use crate::data::to_csv;
 use crate::series::AreaBuckets;
+use rua::deepstatemap::Client as DeepStateMapClient;
 use tracing_subscriber::EnvFilter;
 
 const APP_ABOUT: &str = "RUA - Dynamic transition of territory in the Russian-Ukrainian conflict";
@@ -28,8 +27,6 @@ const DEFAULT_HISTORY_CSV: &str = "dist/history.csv";
 const DEFAULT_FORECAST_CSV: &str = "dist/forecast.csv";
 const CSV_ARCHIVE_EXTENSION: &str = "gz";
 const DEFAULT_FORECAST_HORIZON_DAYS: usize = 365;
-const FETCH_MAX_RETRIES: u32 = 10;
-const FETCH_DELAY_SECS: u64 = 2;
 
 #[derive(Parser, Debug)]
 #[command(name = "rua", about = APP_ABOUT)]
@@ -573,10 +570,11 @@ fn error(message: &str) {
 }
 
 async fn download_to_csv(output_csv: &Path) -> Result<(), String> {
-    let delay = Duration::from_secs(FETCH_DELAY_SECS);
-    let client = fetch::build_client();
-    let areas = fetch_areas(&client, FETCH_MAX_RETRIES, delay).await?;
-    to_csv(&areas, output_csv)?;
+    let client = DeepStateMapClient::default();
+    let snapshots = data::fetch_all_with_progress(&client)
+        .await
+        .map_err(|err| err.to_string())?;
+    to_csv(&snapshots, output_csv)?;
     Ok(())
 }
 

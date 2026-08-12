@@ -13,6 +13,47 @@ RUA принимает только один runtime-параметр: путь 
 cargo run -- --config config.toml
 ```
 
+## Использование как библиотеки
+
+Модуль `rua::deepstatemap` предоставляет типизированный API для загрузки истории
+DeepStateMap и не зависит от конкретной БД или формата хранения. Чтобы не собирать
+зависимости CLI, отключите default features:
+
+```toml
+[dependencies]
+rua = { git = "https://github.com/hexqnt/rua", default-features = false }
+```
+
+Полную историю можно получить одним вызовом:
+
+```rust,no_run
+use rua::deepstatemap::Client;
+
+async fn load_history() -> rua::deepstatemap::Result<()> {
+    let client = Client::default();
+    let snapshots = client.fetch_all().await?;
+    // Сохранение snapshots выполняет вызывающий проект.
+    Ok(())
+}
+```
+
+Для инкрементальной загрузки сначала запросите временные отметки, а затем нужные
+срезы. Это позволяет вызывающему коду самостоятельно управлять транзакциями и
+стратегией сохранения:
+
+```rust,no_run
+use rua::deepstatemap::Client;
+
+async fn sync_history() -> rua::deepstatemap::Result<()> {
+    let client = Client::default();
+    for timestamp in client.timestamps().await? {
+        let snapshot = client.snapshot(timestamp).await?;
+        // Сохранение snapshot выполняет вызывающий проект.
+    }
+    Ok(())
+}
+```
+
 ## Формат `config.toml`
 
 Конфиг строгий: неизвестные поля приводят к ошибке.
