@@ -25,6 +25,42 @@ body {
 	padding: 0 24px;
 }
 
+.data-disclaimer {
+	display: grid;
+	grid-template-rows: 1fr;
+	margin-bottom: 16px;
+	opacity: 1;
+	transition:
+		grid-template-rows 0.35s ease,
+		margin-bottom 0.35s ease,
+		opacity 0.25s ease;
+}
+
+.data-disclaimer.is-collapsed {
+	grid-template-rows: 0fr;
+	margin-bottom: 0;
+	opacity: 0;
+}
+
+.data-disclaimer[hidden] {
+	display: none;
+}
+
+.data-disclaimer-content {
+	min-height: 0;
+	overflow: hidden;
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1.4;
+	text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.data-disclaimer {
+		transition: none;
+	}
+}
+
 .hero {
 	display: flex;
 	flex-wrap: wrap;

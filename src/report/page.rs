@@ -92,6 +92,11 @@ pub(super) fn render_plot_page(
             }
             body {
                 div class="page" {
+                    aside id="data-disclaimer" class="data-disclaimer" role="note" {
+                        div class="data-disclaimer-content" {
+                            "Данные DeepState отражают реальные изменения территории с большой задержкой, могут не показывать последние изменения и имеют систематический уклон в сторону недооценки территории, подконтрольной РФ."
+                        }
+                    }
                     header class="hero" {
                         div {
                             h1 class="title" { (PAGE_TITLE) }

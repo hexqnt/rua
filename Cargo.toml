@@ -54,7 +54,7 @@ reqwest = { version = "0.13.4", features = ["brotli", "zstd", "socks"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.52.3", features = ["time"] }
-toml = { version = "1.1.4", optional = true }
+toml = { version = "1.1.5", optional = true }
 tqdm = { version = "0.8", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = [

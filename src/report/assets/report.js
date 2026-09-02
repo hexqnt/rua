@@ -1,4 +1,19 @@
 (() => {
+	const disclaimer = document.getElementById("data-disclaimer");
+	if (disclaimer) {
+		setTimeout(() => {
+			disclaimer.classList.add("is-collapsed");
+			const transitionDuration = window.matchMedia(
+				"(prefers-reduced-motion: reduce)",
+			).matches
+				? 0
+				: 350;
+			setTimeout(() => {
+				disclaimer.hidden = true;
+			}, transitionDuration);
+		}, 3000);
+	}
+
 	const applyGridDash = (plotId, layoutUpdate) => {
 		const graph = document.getElementById(plotId);
 		if (!graph || typeof Plotly === "undefined") return;
