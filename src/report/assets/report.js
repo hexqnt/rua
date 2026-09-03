@@ -11,7 +11,7 @@
 			setTimeout(() => {
 				disclaimer.hidden = true;
 			}, transitionDuration);
-		}, 3000);
+		}, 7000);
 	}
 
 	const applyGridDash = (plotId, layoutUpdate) => {
