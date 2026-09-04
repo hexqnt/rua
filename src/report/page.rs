@@ -50,8 +50,12 @@ pub(super) fn render_plot_page(
         summary.latest_area_thousand_km2
     );
     let ukraine_percent_label = format!("{:.2}%", summary.ukraine_percent);
+    let ukraine_percent_with_gray_zone_label =
+        format!("{:.2}%", summary.ukraine_percent_with_gray_zone);
     let daily_change_label = format_change(summary.daily_change_km2, UNIT_KM2);
     let weekly_change_label = format_change(summary.weekly_change_km2, UNIT_KM2);
+    let weekly_change_with_gray_zone_label =
+        format_change(summary.weekly_change_with_gray_zone_km2, UNIT_KM2);
     let history_download_label = format!("Скачать {}", download_links.history);
     let forecast_download_label = format!("Скачать {}", download_links.forecast);
     let forecast_card = summary.forecast.as_ref().map(|forecast| {
@@ -121,11 +125,17 @@ pub(super) fn render_plot_page(
                                 div class="summary-sub" {
                                     "Доля от Украины: " (ukraine_percent_label)
                                 }
+                                div class="summary-sub" {
+                                    "с учётом серой зоны: " (ukraine_percent_with_gray_zone_label)
+                                }
                             }
                             div class="summary-card" {
                                 div class="summary-label" { "Изменения" }
                                 div class="summary-value" { (daily_change_label) " за сутки" }
                                 div class="summary-sub" { (weekly_change_label) " за 7 дней" }
+                                div class="summary-sub" {
+                                    (weekly_change_with_gray_zone_label) " за 7 дней с учётом серой зоны"
+                                }
                             }
                             div class="summary-card" {
                                 div class="summary-label" {

@@ -65,10 +65,14 @@ pub(super) struct ChartSummary {
     pub latest_area_thousand_km2: f64,
     /// Доля от площади Украины (в процентах).
     pub ukraine_percent: f64,
+    /// Доля от площади Украины с учётом серой зоны (в процентах).
+    pub ukraine_percent_with_gray_zone: f64,
     /// Изменение за сутки в км² (может отсутствовать при коротком ряде).
     pub daily_change_km2: Option<f64>,
     /// Изменение за 7 дней в км² (может отсутствовать при коротком ряде).
     pub weekly_change_km2: Option<f64>,
+    /// Изменение за 7 дней с учётом серой зоны в км².
+    pub weekly_change_with_gray_zone_km2: Option<f64>,
     /// Сводка по прогнозу (если он передан).
     pub forecast: Option<ForecastSummary>,
 }
@@ -318,6 +322,9 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     } else {
         0.0
     };
+    let latest_unspecified_area = unspecified_area.last().copied().unwrap_or_default();
+    let ukraine_percent_with_gray_zone =
+        (latest_area_sq_km + latest_unspecified_area) / UKRAINE_AREA_SQ_KM * 100.0;
     let latest_date = dates
         .last()
         .copied()
@@ -330,6 +337,17 @@ pub(super) fn build_area_chart_from_buckets_with_config(
     };
     let weekly_change_km2 = if occupied_area.len() >= 8 {
         Some(occupied_area[occupied_area.len() - 1] - occupied_area[occupied_area.len() - 8])
+    } else {
+        None
+    };
+    let weekly_change_with_gray_zone_km2 = if occupied_area.len() >= 8 {
+        let latest_index = occupied_area.len() - 1;
+        let previous_index = occupied_area.len() - 8;
+        Some(
+            occupied_area[latest_index] + unspecified_area[latest_index]
+                - occupied_area[previous_index]
+                - unspecified_area[previous_index],
+        )
     } else {
         None
     };
@@ -673,8 +691,10 @@ pub(super) fn build_area_chart_from_buckets_with_config(
             latest_date: latest_date_label,
             latest_area_thousand_km2,
             ukraine_percent,
+            ukraine_percent_with_gray_zone,
             daily_change_km2,
             weekly_change_km2,
+            weekly_change_with_gray_zone_km2,
             forecast: forecast_summary,
         },
     })
@@ -1496,6 +1516,32 @@ mod tests {
 2023-02-07 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
 2023-02-07 00:00:00 UTC,#bcaaa4,21.0,0.0,unspecified\n";
 
+    const SAMPLE_SUMMARY_CSV: &str = "time_index,hash,area,percent,area_type\n\
+2024-06-01 00:00:00 UTC,#a52714,100.0,0.0,occupied_after_24_02_2022\n\
+2024-06-01 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-01 00:00:00 UTC,#bcaaa4,10.0,0.0,unspecified\n\
+2024-06-02 00:00:00 UTC,#a52714,110.0,0.0,occupied_after_24_02_2022\n\
+2024-06-02 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-02 00:00:00 UTC,#bcaaa4,12.0,0.0,unspecified\n\
+2024-06-03 00:00:00 UTC,#a52714,120.0,0.0,occupied_after_24_02_2022\n\
+2024-06-03 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-03 00:00:00 UTC,#bcaaa4,14.0,0.0,unspecified\n\
+2024-06-04 00:00:00 UTC,#a52714,130.0,0.0,occupied_after_24_02_2022\n\
+2024-06-04 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-04 00:00:00 UTC,#bcaaa4,16.0,0.0,unspecified\n\
+2024-06-05 00:00:00 UTC,#a52714,140.0,0.0,occupied_after_24_02_2022\n\
+2024-06-05 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-05 00:00:00 UTC,#bcaaa4,18.0,0.0,unspecified\n\
+2024-06-06 00:00:00 UTC,#a52714,150.0,0.0,occupied_after_24_02_2022\n\
+2024-06-06 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-06 00:00:00 UTC,#bcaaa4,20.0,0.0,unspecified\n\
+2024-06-07 00:00:00 UTC,#a52714,160.0,0.0,occupied_after_24_02_2022\n\
+2024-06-07 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-07 00:00:00 UTC,#bcaaa4,22.0,0.0,unspecified\n\
+2024-06-08 00:00:00 UTC,#a52714,180.0,0.0,occupied_after_24_02_2022\n\
+2024-06-08 00:00:00 UTC,#01579b,20.0,0.0,other_territories\n\
+2024-06-08 00:00:00 UTC,#bcaaa4,24.0,0.0,unspecified\n";
+
     fn build_chart_from_csv(csv: &str) -> super::ChartOutput {
         let path = write_temp_csv(csv);
         let buckets = load_area_buckets(&path).expect("failed to load area buckets");
@@ -1532,6 +1578,18 @@ mod tests {
             .map(|value| value.as_str().expect("x must be string"))
             .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").expect("valid x date"))
             .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn summary_includes_gray_zone_in_area_share_and_weekly_change() {
+        let chart = build_chart_from_csv(SAMPLE_SUMMARY_CSV);
+
+        let expected_percent = 184.0 / 603_550.0 * 100.0;
+        assert!(
+            (chart.summary.ukraine_percent_with_gray_zone / expected_percent - 1.0).abs() < 1e-12
+        );
+        assert_eq!(chart.summary.weekly_change_km2, Some(80.0));
+        assert_eq!(chart.summary.weekly_change_with_gray_zone_km2, Some(94.0));
     }
 
     #[test]
