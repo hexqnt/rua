@@ -1,6 +1,6 @@
 //! Рендер HTML-страницы с Plotly-графиком.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use maud::{DOCTYPE, PreEscaped, html};
 use plotly::Plot;
 
@@ -44,6 +44,7 @@ pub(super) fn render_plot_page(
         .map(|forecast| forecast.mean_thousand_km2 * 1000.0);
     let country_rows = build_country_rows(latest_area_sq_km, forecast_area_sq_km);
     let generated_label = generated_at.format(GENERATED_AT_FORMAT).to_string();
+    let generated_datetime = generated_at.to_rfc3339_opts(SecondsFormat::Secs, true);
     let latest_area_label = format!(
         "{:.1} {UNIT_THOUSAND_KM2}",
         summary.latest_area_thousand_km2
@@ -152,7 +153,12 @@ pub(super) fn render_plot_page(
                                     }
                                 }
                                 div class="summary-value" { (summary.latest_date) }
-                                div class="summary-sub" { "Сгенерировано: " (generated_label) }
+                                div class="summary-sub" {
+                                    "Сгенерировано: "
+                                    time class="generated-at" datetime=(&generated_datetime) {
+                                        (&generated_label)
+                                    }
+                                }
                             }
                             @if let Some((forecast_title, forecast_value, forecast_range)) = forecast_card {
                                 div class="summary-card" {
@@ -269,7 +275,11 @@ pub(super) fn render_plot_page(
                     }
                     script { (PreEscaped(PAGE_JS)) }
                     footer {
-                        "Версия: " (APP_VERSION) " · Сгенерировано: " (generated_label) " · RUA · Источник: "
+                        "Версия: " (APP_VERSION) " · Сгенерировано: "
+                        time class="generated-at" datetime=(&generated_datetime) {
+                            (&generated_label)
+                        }
+                        " · RUA · Источник: "
                         a href="https://deepstatemap.live" { "deepstatemap.live" }
                     }
                 }

@@ -1,4 +1,22 @@
 (() => {
+	const generatedAtFormatter = new Intl.DateTimeFormat(
+		document.documentElement.lang || undefined,
+		{
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit",
+			timeZoneName: "short",
+		},
+	);
+	document.querySelectorAll("time.generated-at").forEach((element) => {
+		const generatedAt = new Date(element.dateTime);
+		if (!Number.isNaN(generatedAt.getTime())) {
+			element.textContent = generatedAtFormatter.format(generatedAt);
+		}
+	});
+
 	const disclaimer = document.getElementById("data-disclaimer");
 	if (disclaimer) {
 		setTimeout(() => {
