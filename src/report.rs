@@ -3,6 +3,7 @@
 mod chart;
 mod data;
 mod page;
+mod seo;
 
 use std::error::Error;
 use std::fs;
@@ -15,6 +16,7 @@ pub use chart::{ChartRenderConfig, ForecastOverlay};
 
 const DEFAULT_HISTORY_CSV_LINK: &str = "history.csv";
 const DEFAULT_FORECAST_CSV_LINK: &str = "forecast.csv";
+const SITE_URL: &str = "https://rua.hexq.ru/";
 
 #[derive(Clone, Debug)]
 pub struct DownloadLinks {
@@ -84,5 +86,6 @@ fn render_plot(
     } else {
         fs::write(output_html, page)?;
     }
+    seo::write_site_files(output_html, generated_at.date_naive())?;
     Ok(())
 }

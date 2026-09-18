@@ -70,8 +70,9 @@ The repository includes a ready-to-use [`config.toml`](./config.toml). Its
 
 Relative paths in the configuration file are resolved from the directory in
 which RUA is launched. With the example configuration, the complete report is
-written to `dist/index.html`. The generated page loads Plotly and country flags
-from a CDN, so it needs an internet connection when opened.
+written to `dist/index.html`. `sitemap.xml` and `robots.txt` are generated next
+to the report for search engines. The generated page loads Plotly and country
+flags from a CDN, so it needs an internet connection when opened.
 
 Set `archive_csv = true` to compress generated CSV files as `.csv.gz`. Chart,
 forecast, and output settings can be adjusted in their corresponding sections

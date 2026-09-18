@@ -4,15 +4,14 @@ use chrono::{DateTime, Utc};
 use maud::{DOCTYPE, PreEscaped, html};
 use plotly::Plot;
 
-use super::DownloadLinks;
 use super::chart::ChartSummary;
 use super::data::{UNFRIENDLY_COUNTRIES, US_STATES};
+use super::{DownloadLinks, SITE_URL};
 
 const PAGE_TITLE: &str = "Территория подконтрольная РФ с начала СВО";
 const PAGE_SUBTITLE: &str = "Динамика занятых территорий по датам.";
 const PAGE_DESCRIPTION: &str = "Интерактивная страница с графиком динамики контролируемой территории в российско-украинском конфликте: площадь, изменения и прогноз.";
 const PAGE_KEYWORDS: &str = "российско-украинский конфликт, контроль территории, площадь, динамика, график, прогноз, статистика";
-const SITE_URL: &str = "https://rua.hexq.ru/";
 const SITE_NAME: &str = "RUA";
 const FAVICON_DATA_URI: &str = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%232464a6'/%3E%3Ctext%20x='32'%20y='41'%20font-size='28'%20text-anchor='middle'%20font-family='IBM%20Plex%20Sans,%20Arial,%20sans-serif'%20fill='white'%3ER%3C/text%3E%3C/svg%3E";
 const GENERATED_AT_FORMAT: &str = "%Y-%m-%d %H:%M UTC";
